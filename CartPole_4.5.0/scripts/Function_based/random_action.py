@@ -8,7 +8,7 @@ import os
 
 from isaaclab.app import AppLauncher
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
+# sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Train an RL agent with RSL-RL.")
@@ -51,8 +51,10 @@ from isaaclab.envs import (
 )
 from isaaclab_tasks.utils import get_checkpoint_path, parse_env_cfg
 
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../source/CartPole")))
+
 # Import extensions to set up environment tasks
-import CartPole.tasks  # noqa: F401
+import CartPole.tasks # noqa: F401
 
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
