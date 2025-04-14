@@ -29,7 +29,7 @@ class Actor(nn.Module):
         # Use a non-linear activation for hidden layers
         self.relu = nn.ReLU()
         # For discrete action space, we apply Softmax across actions
-        self.softmax = nn.Softmax(dim=-1)
+        self.tanh = nn.Tanh()
 
         # Define an optimizer for this network
         self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
@@ -61,7 +61,7 @@ class Actor(nn.Module):
         x = self.relu(self.fc1(state))
         x = self.relu(self.fc2(x))
         x = self.fc3(x)
-        x = self.softmax(x)
+        x = self.tanh(x)
         return x
         # ====================================== #
 
@@ -129,8 +129,7 @@ class Actor_Critic(BaseAlgorithm):
                 num_of_action: int = 2,
                 action_range: list = [-2.5, 2.5],
                 n_observations: int = 4,
-                hidden_dim = 256,
-                dropout = 0.05, 
+                hidden_dim = 256, 
                 learning_rate: float = 0.01,
                 tau: float = 0.005,
                 discount_factor: float = 0.95,
@@ -154,22 +153,23 @@ class Actor_Critic(BaseAlgorithm):
         """
         # Feel free to add or modify any of the initialized variables above.
         # ========= put your code here ========= #
-        self.device = device
-        self.actor = Actor(n_observations, hidden_dim, num_of_action, learning_rate).to(device)
-        self.actor_target = Actor(n_observations, hidden_dim, num_of_action, learning_rate).to(device)
-        self.critic = Critic(n_observations, num_of_action, hidden_dim, learning_rate).to(device)
-        self.critic_target = Critic(n_observations, num_of_action, hidden_dim, learning_rate).to(device)
 
-        self.batch_size = batch_size
-        self.tau = tau
-        self.discount_factor = discount_factor
+        # self.device = torch.device(device) if device is not None else torch.device("cpu")
+        # self.actor = Actor(n_observations, hidden_dim, num_of_action, learning_rate).to(device)
+        # self.actor_target = Actor(n_observations, hidden_dim, num_of_action, learning_rate).to(device)
+        # self.critic = Critic(n_observations, num_of_action, hidden_dim, learning_rate).to(device)
+        # self.critic_target = Critic(n_observations, num_of_action, hidden_dim, learning_rate).to(device)
 
-        self.update_target_networks(tau=1)  # initialize target networks
+        # self.batch_size = batch_size
+        # self.tau = tau
+        # self.discount_factor = discount_factor
+
+        # self.update_target_networks(tau=1)  # initialize target networks
 
         # Experiment with different values and configurations to see how they affect the training process.
         # Remember to document any changes you make and analyze their impact on the agent's performance.
 
-        pass
+        # pass
         # ====================================== #
 
         super(Actor_Critic, self).__init__(
@@ -182,25 +182,88 @@ class Actor_Critic(BaseAlgorithm):
         )
 
         #========================================================= #
-        self.device = device if device is not None else "cpu"
-        
-        # Initialize actor and critic (online networks)
-        self.actor = Actor(n_observations, hidden_dim, num_of_action, learning_rate).to(self.device)
-        self.critic = Critic(n_observations, num_of_action, hidden_dim, learning_rate).to(self.device)
+        self.device = (torch.device(device) if device is not None else
+                       torch.device("cuda" if torch.cuda.is_available() else "cpu"))
 
-        # Initialize target networks
-        self.actor_target = Actor(n_observations, hidden_dim, num_of_action, learning_rate).to(self.device)
-        self.critic_target = Critic(n_observations, num_of_action, hidden_dim, learning_rate).to(self.device)
+        # ---- networks ----------------------------------------------------
+        self.actor         = Actor(n_observations, hidden_dim, num_of_action).to(self.device)
+        self.actor_target  = Actor(n_observations, hidden_dim, num_of_action).to(self.device)
+        self.critic        = Critic(n_observations, num_of_action, hidden_dim).to(self.device)
+        self.critic_target = Critic(n_observations, num_of_action, hidden_dim).to(self.device)
 
-        # Copy weights from online to target (Polyak update with tau=1)
-        self.update_target_networks(tau=1.0)
+        self.actor_target.load_state_dict(self.actor.state_dict())
+        self.critic_target.load_state_dict(self.critic.state_dict())
+
+        # ---- optimizers --------------------------------------------------
+        self.actor_opt  = optim.Adam(self.actor.parameters(),  lr=learning_rate)
+        self.critic_opt = optim.Adam(self.critic.parameters(), lr=learning_rate)
+
+        # ---- misc --------------------------------------------------------
+        self.tau     = tau
+        self.gamma   = discount_factor
+        self.batch_size = batch_size
+        self.mse     = nn.MSELoss()
         # ========================================================= #
 
         # Additional parameters
-        self.batch_size = batch_size
-        self.tau = tau
-        self.discount_factor = discount_factor
+        # self.batch_size = batch_size
+        # self.tau = tau
+        # self.discount_factor = discount_factor
 
+    @staticmethod
+    def _unwrap_obs(obs):
+        """
+        Return a 1‑D numeric vector (NumPy array or torch.Tensor) given
+        an observation that may be:
+        • already a vector,
+        • a dict with keys like 'policy', 'obs', 'state', etc.,
+        • nested one level deeper (e.g. {'policy': {'obs': ...}}).
+
+        The function also squeezes a leading batch dimension of size 1,
+        so shapes (obs_dim,) and (1, obs_dim) are both converted to
+        (obs_dim,).
+
+        Raises
+        ------
+        KeyError
+            If no array‑like value can be found inside a dict.
+        """
+        """Return flat numeric vector from possibly nested dict."""
+        if isinstance(obs, dict):
+            for k in ("policy", "obs", "state", "observation"):
+                if k in obs:
+                    return Actor_Critic._unwrap_obs(obs[k])
+            raise KeyError("No array in observation dict")
+        if isinstance(obs, (list, tuple)):
+            obs = np.asarray(obs, dtype=np.float32)
+        if isinstance(obs, np.ndarray):
+            obs = torch.as_tensor(obs, dtype=torch.float32)
+        if obs.ndim == 2 and obs.shape[0] == 1:
+            obs = obs.squeeze(0)
+        return obs
+
+    def scale_action(self, action_vec):
+        """
+        Parameters
+        ----------
+        action_vec : np.ndarray | torch.Tensor | list
+            1‑D vector whose components are in the range (-1, 1).
+
+        Returns
+        -------
+        torch.Tensor  shape = [1, act_dim]   (same device as the agent)
+            Scaled actions in the user‑defined action_range.
+        """
+        if isinstance(action_vec, (list, tuple)):
+            action_vec = np.asarray(action_vec, dtype=np.float32)
+        if isinstance(action_vec, np.ndarray):
+            action_vec = torch.from_numpy(action_vec)
+        action_vec = action_vec.to(self.device).float()        # 1‑D tensor
+
+        a_min, a_max = self.action_range
+        scaled = a_min + 0.5 * (action_vec + 1.0) * (a_max - a_min)  # element‑wise
+        return scaled.unsqueeze(0)    
+    
     def select_action(self, state, noise=0.0):
         """
         Selects an action based on the current policy with optional exploration noise.
@@ -216,67 +279,43 @@ class Actor_Critic(BaseAlgorithm):
         """
         # ========= put your code here ========= #
         # Convert state to torch if it's a NumPy array
-        if not isinstance(state, torch.Tensor):
-            state_t = torch.FloatTensor(state).to(self.device).unsqueeze(0)  # shape [1, state_dim]
-        else:
-            state_t = state.to(self.device).unsqueeze(0)
+        s = self._unwrap_obs(state).to(self.device)
+        if s.ndim == 1:
+            s = s.unsqueeze(0)                         # (1, obs_dim)
 
-        # Put actor in evaluation mode if you want to avoid dropout, etc.
-        self.actor.eval()
         with torch.no_grad():
-            # Actor outputs an unbounded or [-1,1]-bounded action (depends on your Actor's design)
-            action = self.actor(state_t)
-        self.actor.train()
+            a = self.actor(s)[0].cpu().numpy()         # in (‑1,1)
 
-        # Convert to NumPy for noise processing
-        action = action.cpu().numpy()[0]  # shape: [action_dim]
-
-        # Add exploration noise (for continuous control)
         if noise > 0.0:
-            action += noise * np.random.randn(*action.shape)
+            a += noise * np.random.randn(*a.shape)
 
-        # Clip action to [-1, 1] if your actor is designed that way
-        clipped_action = np.clip(action, -1.0, 1.0)
-
-        # Scale action from [-1,1] to [action_min, action_max]
-        scaled_action = self.scale_action(clipped_action)
-
-        return scaled_action, clipped_action
+        a = np.clip(a, -1.0, 1.0)
+        return self.scale_action(a), a   
         # ====================================== #
     
     def generate_sample(self, batch_size):
         """
-        Generates a batch sample from memory for training.
-
-        Returns:
-            Tuple: A tuple containing:
-                - state_batch (Tensor): The batch of current states.
-                - action_batch (Tensor): The batch of actions taken.
-                - reward_batch (Tensor): The batch of rewards received.
-                - next_state_batch (Tensor): The batch of next states received.
-                - done_batch (Tensor): The batch of dones received.
+        Sample a batch from replay buffer and convert to tensors.
+        Handles multi-agent reward shapes correctly.
         """
-        # Ensure there are enough samples in memory before proceeding
-        # ========= put your code here ========= #
-        # Sample a batch from memory
-        batch = self.memory.sample()
-        # ====================================== #
-        
-        # Sample a batch from memory
-        # ========= put your code here ========= #
         if len(self.memory) < batch_size:
             return None
 
         states, actions, rewards, next_states, dones = self.memory.sample()
-        
-        # Convert to torch tensors
-        state_batch = torch.FloatTensor(states).to(self.device)
-        action_batch = torch.FloatTensor(actions).to(self.device)
-        reward_batch = torch.FloatTensor(rewards).unsqueeze(-1).to(self.device)  # shape [batch_size, 1]
-        next_state_batch = torch.FloatTensor(next_states).to(self.device)
-        done_batch = torch.FloatTensor(dones).unsqueeze(-1).to(self.device)      # shape [batch_size, 1]
-        
+
+        # Unwrap and convert observations to tensor
+        state_batch  = torch.stack([self._unwrap_obs(s) for s in states]).to(self.device)
+        action_batch = torch.stack([torch.as_tensor(a, dtype=torch.float32) for a in actions]).to(self.device)
+        next_state_batch = torch.stack([self._unwrap_obs(s2) for s2 in next_states]).to(self.device)
+
+        # Convert rewards/dones safely
+        reward_batch = torch.stack([r if torch.is_tensor(r) else torch.tensor(r, dtype=torch.float32)
+                            for r in rewards]).to(self.device).view(-1, 1)
+        done_batch   = torch.stack([d if torch.is_tensor(d) else torch.tensor(d, dtype=torch.float32)
+                          for d in dones]).to(self.device).view(-1, 1)
+
         return state_batch, action_batch, reward_batch, next_state_batch, done_batch
+
         # ====================================== #
 
     def calculate_loss(self, states, actions, rewards, next_states, dones):
@@ -296,28 +335,15 @@ class Actor_Critic(BaseAlgorithm):
         # ========= put your code here ========= #
         
         # ----- Critic Update -----
-        # 1) Compute target Q-value
         with torch.no_grad():
-            # Actor target to get next action
             next_actions = self.actor_target(next_states)
-            # Critic target to get Q(s', a')
-            target_Q = self.critic_target(next_states, next_actions)
-            # Bellman backup
-            y = rewards + self.discount_factor * (1 - dones) * target_Q
+            q_tgt = rewards + self.gamma * (1 - dones) * self.critic_target(next_states, next_actions)
 
-        # 2) Current Q estimate
-        current_Q = self.critic(states, actions)
+        q      = self.critic(states, actions)
+        critic = self.mse(q, q_tgt)
 
-        # 3) Critic loss = MSE of (current_Q - y)
-        critic_loss_fn = nn.MSELoss()
-        critic_loss = critic_loss_fn(current_Q, y)
-
-        # ----- Actor Update -----
-        # Policy gradient update: maximize Q(s, a) w.r.t. the actor’s parameters
-        predicted_actions = self.actor(states)
-        actor_loss = -self.critic(states, predicted_actions).mean()
-
-        return critic_loss, actor_loss
+        actor  = -self.critic(states, self.actor(states)).mean()
+        return critic, actor
         # ====================================== #
 
     def update_policy(self):
@@ -328,31 +354,43 @@ class Actor_Critic(BaseAlgorithm):
             float: Loss value after the update.
         """
         # ========= put your code here ========= #
-        sample = self.generate_sample(self.batch_size)
-        if sample is None:
-            return  # Not enough samples yet
+        """One gradient step for critic then actor (no in‑place clash)."""
+        batch = self.generate_sample(self.batch_size)
+        if batch is None:
+            return
 
-        states, actions, rewards, next_states, dones = sample
-
-        # (Optional) Normalize rewards
+        states, actions, rewards, next_states, dones = batch
         rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-7)
 
-        # Calculate losses
-        critic_loss, actor_loss = self.calculate_loss(states, actions, rewards, next_states, dones)
+        # ---------- Critic update ------------------------------------------
+        with torch.no_grad():
+            next_actions = self.actor_target(next_states)
+            q_target = rewards + self.gamma * (1 - dones) * \
+                    self.critic_target(next_states, next_actions)
 
-        # --- Update Critic ---
-        self.critic.optimizer.zero_grad()
+        q     = self.critic(states, actions)
+        critic_loss = self.mse(q, q_target)
+
+        self.critic_opt.zero_grad()
         critic_loss.backward()
-        # Optional gradient clipping
-        nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=10.0)
-        self.critic.optimizer.step()
+        nn.utils.clip_grad_norm_(self.critic.parameters(), 10.0)
+        self.critic_opt.step()
 
-        # --- Update Actor ---
-        self.actor.optimizer.zero_grad()
+        # ---------- Actor update  (re‑compute with fresh critic) ------------
+        actor_loss = -self.critic(states, self.actor(states)).mean()
+
+        self.actor_opt.zero_grad()
         actor_loss.backward()
-        # Optional gradient clipping
-        nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=10.0)
-        self.actor.optimizer.step()
+        nn.utils.clip_grad_norm_(self.actor.parameters(), 10.0)
+        self.actor_opt.step()
+
+        # ---------- Soft update of targets ---------------------------------
+        with torch.no_grad():
+            for t, s in zip(self.actor_target.parameters(), self.actor.parameters()):
+                t.data.mul_(1 - self.tau).add_(self.tau * s.data)
+            for t, s in zip(self.critic_target.parameters(), self.critic.parameters()):
+                t.data.mul_(1 - self.tau).add_(self.tau * s.data)
+
         # ====================================== #
 
 
@@ -394,71 +432,57 @@ class Actor_Critic(BaseAlgorithm):
         # Flag to indicate episode termination (boolean)
         # Step counter (int)
         # ========= put your code here ========= #
-        state = env.reset()
-        total_reward = 0.0
+        state, _ = env.reset()
+
+        # 🔓 unwrap 'policy' key if needed
+        if isinstance(state, dict) and 'policy' in state:
+            state = state['policy']
+
+        ep_ret = 0.0
         noise = noise_scale
-        # ====================================== #
+        ep_ret = 0.0
+        noise = noise_scale
 
-        for step in range(max_steps):
-            # Predict action from the policy network
-            # ========= put your code here ========= #
-            if num_agents > 1:
-                # Multi-Agent scenario
-                scaled_actions, clipped_actions = [], []
-                for agent_i in range(num_agents):
-                    s_i = state[agent_i]
-                    a_scaled, a_clipped = self.select_action(s_i, noise=noise)
-                    scaled_actions.append(a_scaled)
-                    clipped_actions.append(a_clipped)
+        for _ in range(max_steps):
+            act_scaled_list, act_raw_list = [], []
+
+            for i in range(num_agents):
+                a_s, a_r = self.select_action(state[i], noise)
+                act_scaled_list.append(a_s)
+                act_raw_list.append(a_r)
+
+            act_scaled = torch.cat(act_scaled_list, dim=0)  # shape [num_agents, action_dim]
+            step_out = env.step(act_scaled)
+
+            if len(step_out) == 5:
+                next_state, reward, terminated, truncated, _ = step_out
+                if isinstance(next_state, dict) and 'policy' in next_state:
+                    next_state = next_state['policy']
+                done_flag = [t or tr for t, tr in zip(terminated, truncated)]
             else:
-                # Single-Agent scenario
-                scaled_action, clipped_action = self.select_action(state, noise=noise)
-            # ====================================== #
+                next_state, reward, done_flag, _ = step_out
 
-            # Execute action in the environment and observe next state and reward
-            # ========= put your code here ========= #
-            if num_agents > 1:
-                next_state, reward, done, info = env.step(scaled_actions)
-            else:
-                next_state, reward, done, info = env.step(scaled_action)
-            # ====================================== #
+            for i in range(num_agents):
+                r = reward[i]
+                d = done_flag[i]
+                r = r.item() if torch.is_tensor(r) and r.numel() == 1 else float(r[0]) if torch.is_tensor(r) else float(r)
+                d = d.item() if torch.is_tensor(d) and d.numel() == 1 else bool(d[0]) if torch.is_tensor(d) else bool(d)
 
-            # Store the transition in memory
-            # ========= put your code here ========= #
-            # Parallel Agents Training
-            if num_agents > 1:
-            # Parallel Agents Training
-                for agent_i in range(num_agents):
-                    self.memory.add(
-                        state[agent_i],
-                        clipped_actions[agent_i],
-                        reward[agent_i],
-                        next_state[agent_i],
-                        done[agent_i]
-                    )
-                total_reward += sum(reward)
-            # Single Agent Training
-            else:
-                self.memory.add(state, clipped_action, reward, next_state, done)
-                total_reward += reward
-            # ====================================== #
+                self.memory.add(
+                    self._unwrap_obs(state[i]),
+                    torch.as_tensor(act_raw_list[i], dtype=torch.float32),
+                    r,
+                    self._unwrap_obs(next_state[i]),
+                    d,
+                )
+                ep_ret += r
 
-            # Update state
-            if num_agents > 1:
-                state = next_state
-                # If all agents are done, break
-                if all(done):
-                    break
-            else:
-                state = next_state
-                if done:
-                    break
-
-            # Decay the noise to gradually shift from exploration to exploitation
+            self.update_policy()
+            state = next_state
             noise *= noise_decay
 
-            # Perform one step of the optimization (on the policy network)
-            self.update_policy()
+            if all(bool(d) for d in done_flag):
+                break
 
-            # Update target networks
-            self.update_target_networks()
+
+        return float(ep_ret)

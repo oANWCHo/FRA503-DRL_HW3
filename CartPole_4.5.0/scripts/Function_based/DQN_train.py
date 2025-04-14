@@ -10,7 +10,7 @@ from isaaclab.app import AppLauncher
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-from RL_Algorithm.Function_Aproximation.DQN import DQN
+from RL_Algorithm.Function_based.DQN import DQN
 
 from tqdm import tqdm
 
@@ -68,6 +68,8 @@ from isaaclab.envs import (
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
 from isaaclab_tasks.utils.hydra import hydra_task_config
 
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../source/CartPole")))
+###ใส่ 2 อันเลย
 # Import extensions to set up environment tasks
 import CartPole.tasks  # noqa: F401
 
@@ -100,18 +102,21 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # ========================= Can be modified ========================== #
 
     # hyperparameters
-    num_of_action = None
-    action_range = [None, None]  
-    learning_rate = None
-    hidden_dim = None
-    n_episodes = None
-    initial_epsilon = None
-    epsilon_decay = None  
-    final_epsilon = None
-    discount = None
-    buffer_size = None
-    batch_size = None
+    num_of_action = 2
+    action_range = [-16.0, 16.0]
+    n_observations = 4
+    hidden_dim = 128
+    dropout = 0.0
+    learning_rate = 0.001
+    tau = 0.001
+    initial_epsilon = 1.0
+    epsilon_decay = 0.995
+    final_epsilon = 0.01
+    discount_factor = 0.99
+    buffer_size = 50000
+    batch_size = 64
 
+    n_episodes = 5000
 
     # set up matplotlib
     is_ipython = 'inline' in matplotlib.get_backend()
@@ -134,14 +139,17 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     agent = DQN(
         device=device,
-        num_of_action=num_of_action,
-        action_range=action_range,
-        learning_rate=learning_rate,
-        hidden_dim=hidden_dim,
+        num_of_action = num_of_action,
+        action_range = action_range,
+        n_observations = n_observations,
+        hidden_dim = hidden_dim,
+        dropout = dropout,
+        learning_rate = learning_rate,
+        tau = tau,
         initial_epsilon = initial_epsilon,
         epsilon_decay = epsilon_decay,
         final_epsilon = final_epsilon,
-        discount_factor = discount,
+        discount_factor = discount_factor,
         buffer_size = buffer_size,
         batch_size = batch_size,
     )
@@ -149,24 +157,36 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # reset environment
     obs, _ = env.reset()
     timestep = 0
-    # simulate environment
+    all_rewards = []
+
+    # Outer loop: while simulation is running
     while simulation_app.is_running():
-        # run everything in inference mode
-        # with torch.inference_mode():
-        
-        for episode in tqdm(range(n_episodes)):
-            agent.lean(env)
 
-        if episode % 100 == 0:
-            print(agent.epsilon)
+        # for each episode
+        for episode in tqdm(range(n_episodes), desc="Episode"):
+            # reset environment for this new episode
+            ep_reward = agent.learn(env)
+            all_rewards.append(ep_reward)
+            # Episode done → store total reward
 
-            # Save Q-Learning agent
-            w_file = f"{Algorithm_name}_{episode}_{num_of_action}_{action_range[1]}.json"
-            full_path = os.path.join(f"w/{task_name}", Algorithm_name)
-            agent.save_w(full_path, w_file)
-        
-        print('Complete')
-        agent.plot_durations(show_result=True)
+            # Print average reward every 100 episodes
+            if (episode + 1) % 100 == 0:
+                # compute mean of last 100
+                avg_reward = np.mean(all_rewards[-100:])
+                print(f"[Episode {episode+1:4d}]   AvgReward(Last100) = {avg_reward:.2f}   Epsilon = {agent.epsilon:.3f}")
+
+            # Example checkpoint logic
+            if (episode + 1) % 100 == 0:
+                w_file = f"{Algorithm_name}_ep{episode+1}.pt"
+                full_path = os.path.join("weights", task_name, Algorithm_name)
+                os.makedirs(full_path, exist_ok=True)
+                # If your DQN doesn't override save_w, do:
+                # torch.save(agent.policy_net.state_dict(), os.path.join(full_path, w_file))
+                agent.save_w(full_path, w_file)  # if you wrote a custom override
+                print(f"Checkpoint saved at ep {episode+1} → {os.path.join(full_path, w_file)}")
+
+        print("Training Complete.")
+        agent.plot_durations(show_result=True)  # if your agent uses that
         plt.ioff()
         plt.show()
             

@@ -22,9 +22,16 @@ class DQN_network(nn.Module):
         dropout (float): Dropout rate for regularization.
     """
     def __init__(self, n_observations, hidden_size, n_actions, dropout):
-        super(DQN_network, self).__init__()
-        # ========= put your code here ========= #
-        pass
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(n_observations, hidden_size),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_size, hidden_size),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_size, n_actions)
+        )
         # ====================================== #
 
     def forward(self, x):
@@ -38,7 +45,7 @@ class DQN_network(nn.Module):
             Tensor: Q-value estimates for each action.
         """
         # ========= put your code here ========= #
-        pass
+        return self.net(x)
         # ====================================== #
 
 class DQN(BaseAlgorithm):
@@ -53,11 +60,11 @@ class DQN(BaseAlgorithm):
             learning_rate: float = 0.01,
             tau: float = 0.005,
             initial_epsilon: float = 1.0,
-            epsilon_decay: float = 1e-3,
+            epsilon_decay: float = 0.995,
             final_epsilon: float = 0.001,
             discount_factor: float = 0.95,
             buffer_size: int = 1000,
-            batch_size: int = 1,
+            batch_size: int = 32,
     ) -> None:
         """
         Initialize the CartPole Agent.
@@ -72,25 +79,44 @@ class DQN(BaseAlgorithm):
 
         # Feel free to add or modify any of the initialized variables above.
         # ========= put your code here ========= #
-        self.policy_net = DQN_network(n_observations, hidden_dim, num_of_action, dropout).to(device)
-        self.target_net = DQN_network(n_observations, hidden_dim, num_of_action, dropout).to(device)
-        self.target_net.load_state_dict(self.policy_net.state_dict())
+        if device is None:
+            self.device = (
+                torch.device("cuda") if torch.cuda.is_available() else
+                torch.device("mps")  if torch.backends.mps.is_available() else
+                torch.device("cpu")
+            )
+        else:
+            self.device = torch.device(device)
 
-        self.device = device
-        self.steps_done = 0
-        self.num_of_action = num_of_action
+        # ------------------------------------------------------------------ #
+        # 1)  build policy & target networks directly on that device
+        # ------------------------------------------------------------------ #
+        self.policy_net = DQN_network(
+            n_observations, hidden_dim, num_of_action, dropout
+        ).to(self.device)
+
+        self.target_net = DQN_network(
+            n_observations, hidden_dim, num_of_action, dropout
+        ).to(self.device)
+
+        self.target_net.load_state_dict(self.policy_net.state_dict())   # hard copy
+        self.target_net.eval()                                          # target net in eval‑mode
+
+        # ------------------------------------------------------------------ #
+        # 2)  optimizers & loss
+        # ------------------------------------------------------------------ #
+        self.optimizer = optim.Adam(self.policy_net.parameters(), lr=learning_rate)
+        self.criterion = nn.SmoothL1Loss()      # Huber loss
+
+        # ------------------------------------------------------------------ #
+        # 3)  other agent‑specific bookkeeping
+        # ------------------------------------------------------------------ #
+        self.batch_size = batch_size 
         self.tau = tau
-
-        self.optimizer = optim.AdamW(self.policy_net.parameters(), lr=learning_rate, amsgrad=True)
-
-        self.episode_durations = []
-        self.buffer_size = buffer_size
-        self.batch_size = batch_size
-
-        # Experiment with different values and configurations to see how they affect the training process.
-        # Remember to document any changes you make and analyze their impact on the agent's performance.
-
-        pass
+        self.num_of_action = num_of_action
+        self.steps_done = 0
+        self.update_counter = 0            # counts gradient steps for diagnostics
+        self.episode_durations: list[int] = []
         # ====================================== #
 
         super(DQN, self).__init__(
@@ -112,6 +138,60 @@ class DQN(BaseAlgorithm):
 
         plt.ion()
 
+    @staticmethod
+    def _unwrap_obs(obs):
+        """
+        Return a 1‑D numeric vector (NumPy array or torch.Tensor) given
+        an observation that may be:
+        • already a vector,
+        • a dict with keys like 'policy', 'obs', 'state', etc.,
+        • nested one level deeper (e.g. {'policy': {'obs': ...}}).
+
+        The function also squeezes a leading batch dimension of size 1,
+        so shapes (obs_dim,) and (1, obs_dim) are both converted to
+        (obs_dim,).
+
+        Raises
+        ------
+        KeyError
+            If no array‑like value can be found inside a dict.
+        """
+        # 1) If it's already a tensor / ndarray / list, we're done.
+        if isinstance(obs, (np.ndarray, list, tuple, torch.Tensor)):
+            vec = obs
+        # 2) If it's a dict, look for the common keys.
+        elif isinstance(obs, dict):
+            candidate = None
+            for key in ("policy", "obs", "state", "policy_obs", "observation"):
+                if key in obs:
+                    candidate = obs[key]
+                    break
+            if candidate is None:
+                raise KeyError(f"_unwrap_obs: no numeric vector in keys {list(obs.keys())}")
+
+            # If the candidate is itself a dict, grab the first array‑like value.
+            if isinstance(candidate, dict):
+                for v in candidate.values():
+                    if isinstance(v, (np.ndarray, list, tuple, torch.Tensor)):
+                        candidate = v
+                        break
+                else:
+                    raise KeyError("_unwrap_obs: nested dict contains no array‑like values")
+
+            vec = candidate
+        else:
+            raise TypeError(f"_unwrap_obs: unsupported type {type(obs)}")
+
+        # 3) Convert lists / tuples to NumPy for consistency.
+        if isinstance(vec, (list, tuple)):
+            vec = np.asarray(vec, dtype=np.float32)
+
+        # 4) Remove a leading batch dim of size 1 (shape (1, obs_dim) → (obs_dim,))
+        if hasattr(vec, "ndim") and vec.ndim == 2 and vec.shape[0] == 1:
+            vec = vec.squeeze(0)
+
+        return vec
+    
     def select_action(self, state):
         """
         Select an action based on an epsilon-greedy policy.
@@ -123,7 +203,43 @@ class DQN(BaseAlgorithm):
             Tensor: The selected action.
         """
         # ========= put your code here ========= #
-        pass 
+        if isinstance(state, dict):
+            # ordered list of likely keys
+            for k in ("obs", "state", "policy", "policy_obs", "observation"):
+                if k in state:
+                    state = state[k]
+                    # if it’s still a dict (e.g. {"obs": ...}) unwrap one more level
+                    if isinstance(state, dict):
+                        # try to grab the first ndarray in that sub‑dict
+                        for v in state.values():
+                            if isinstance(v, (np.ndarray, list, tuple, torch.Tensor)):
+                                state = v
+                                break
+                    break
+            else:
+                raise KeyError(
+                    f"select_action: could not find observation vector in keys {list(state.keys())}"
+                )
+
+        sample = random.random()
+        eps_threshold = self.epsilon
+
+        if sample > eps_threshold:
+            with torch.no_grad():
+                # after you have extracted the ndarray into `state`
+                state_t = torch.as_tensor(state, dtype=torch.float32, device=self.device)
+
+                # If state already has a batch dimension (shape [1, obs_dim]) do NOT add another
+                if state_t.ndim == 1:          # shape (obs_dim,)
+                    state_t = state_t.unsqueeze(0)        # → (1, obs_dim)
+
+                # forward pass
+                q_vals = self.policy_net(state_t)         # shape (1, num_actions)
+
+                action = q_vals.argmax(dim=1).item() 
+        else:
+            action = random.randrange(self.num_of_action)
+        return action
         # ====================================== #
 
     def calculate_loss(self, non_final_mask, non_final_next_states, state_batch, action_batch, reward_batch):
@@ -141,7 +257,17 @@ class DQN(BaseAlgorithm):
             Tensor: Computed loss.
         """
         # ========= put your code here ========= #
-        pass
+        # Current Q(s,a)
+        q_sa = self.policy_net(state_batch).gather(1, action_batch)
+
+        # Target Q
+        next_q = torch.zeros_like(reward_batch).to(self.device)
+        with torch.no_grad():
+            next_q_vals = self.target_net(non_final_next_states).max(1)[0].unsqueeze(1)
+            next_q[non_final_mask] = next_q_vals
+        target_q = reward_batch + self.discount_factor * next_q
+
+        return self.criterion(q_sa, target_q)
         # ====================================== #
 
     def generate_sample(self, batch_size):
@@ -159,12 +285,35 @@ class DQN(BaseAlgorithm):
         # Ensure there are enough samples in memory before proceeding
         # ========= put your code here ========= #
         # Sample a batch from memory
-        batch = self.memory.sample()
+        # batch = self.memory.sample()
         # ====================================== #
         
         # Sample a batch from memory
         # ========= put your code here ========= #
-        pass
+        if len(self.memory) < batch_size:
+            return None
+
+        states, actions, rewards, next_states, dones = self.memory.sample()
+        # unwrap dict observations
+        states      = [ self._unwrap_obs(s)  for s in states ]
+        next_states = [ self._unwrap_obs(s)  for s in next_states ]
+        state_batch = torch.stack(
+            [torch.as_tensor(s, dtype=torch.float32, device=self.device).view(-1) for s in states]
+        )  
+        action_batch = torch.tensor(actions, dtype=torch.int64,   device=self.device).unsqueeze(1)
+        reward_batch = torch.tensor(rewards, dtype=torch.float32, device=self.device).unsqueeze(1)
+
+        # mask for non‑terminal
+        non_final_mask = torch.tensor(
+            [not d for d in dones], dtype=torch.bool, device=self.device
+        )
+        non_final_next_states = torch.stack(
+            [torch.as_tensor(s, dtype=torch.float32, device=self.device).view(-1)
+            for s, d in zip(next_states, dones) if not d]
+        ) if non_final_mask.any() else torch.empty((0, state_batch.size(1)),
+                                                dtype=torch.float32, device=self.device)
+
+        return non_final_mask, non_final_next_states, state_batch, action_batch, reward_batch
         # ====================================== #
 
     def update_policy(self):
@@ -185,7 +334,10 @@ class DQN(BaseAlgorithm):
 
         # Perform gradient descent step
         # ========= put your code here ========= #
-        pass
+        self.optimizer.zero_grad()
+        loss.backward()
+        nn.utils.clip_grad_norm_(self.policy_net.parameters(), 1.0)
+        self.optimizer.step()
         # ====================================== #
 
     def update_target_networks(self):
@@ -194,17 +346,20 @@ class DQN(BaseAlgorithm):
         """
         # Retrieve the state dictionaries (weights) of both networks
         # ========= put your code here ========= #
-        pass
+        policy_state  = self.policy_net.state_dict()   # online / policy
+        target_state  = self.target_net.state_dict()   # target (to be updated)
         # ====================================== #
         
         # Apply the soft update rule to each parameter in the target network
         # ========= put your code here ========= #
-        pass
+        tau = self.tau
+        for key in policy_state:                       # same keys in both dicts
+            target_state[key] = tau * policy_state[key] + (1.0 - tau) * target_state[key]
         # ====================================== #
         
         # Load the updated weights into the target network
         # ========= put your code here ========= #
-        pass
+        self.target_net.load_state_dict(target_state)
         # ====================================== #
 
     def learn(self, env):
@@ -221,23 +376,30 @@ class DQN(BaseAlgorithm):
         # Flag to indicate episode termination (boolean)
         # Step counter (int)
         # ========= put your code here ========= #
-        pass
+        state, _ = env.reset()           # state : np.ndarray
+        total_reward = 0.0
+        done = False
+        timestep = 0
         # ====================================== #
 
         while not done:
             # Predict action from the policy network
             # ========= put your code here ========= #
-            pass
+            action = self.select_action(state)          # int ∈ [0, num_actions)
+            action_tensor = torch.tensor([[action]], dtype=torch.int64)
             # ====================================== #
 
             # Execute action in the environment and observe next state and reward
             # ========= put your code here ========= #
-            pass
+            next_state, reward, terminated, truncated,_ = env.step(action_tensor)
+            done = terminated or truncated
             # ====================================== #
 
             # Store the transition in memory
             # ========= put your code here ========= #
-            pass
+            self.memory.add(state, action, reward, next_state, done)
+
+            total_reward += float(reward.item())
             # ====================================== #
 
             # Update state
@@ -246,12 +408,14 @@ class DQN(BaseAlgorithm):
             self.update_policy()
 
             # Soft update of the target network's weights
-            self.update_weights()
+            self.update_target_networks()
 
+            state = next_state
             timestep += 1
             if done:
                 self.plot_durations(timestep)
-                break
+                self.decay_epsilon()
+                return total_reward
 
     # Consider modifying this function to visualize other aspects of the training process.
     # ================================================================================== #
@@ -282,4 +446,7 @@ class DQN(BaseAlgorithm):
                 display.clear_output(wait=True)
             else:
                 display.display(plt.gcf())
+
+
+    
     # ================================================================================== #

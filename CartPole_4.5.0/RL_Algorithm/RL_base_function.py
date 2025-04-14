@@ -134,34 +134,47 @@ class BaseAlgorithm():
         # ====================================== #
         
     
+    # def scale_action(self, action):
+    #     """
+    #     Maps a discrete action in range [0, n] to a continuous value in [action_min, action_max].
+
+    #     Args:
+    #         action (int): Discrete action in range [0, n].
+    #         n (int): Number of discrete actions (inclusive range from 0 to n).
+        
+    #     Returns:
+    #         torch.Tensor: Scaled action tensor.
+    #     """
+    #     # ========= put your code here ========= #
+    #     action_min, action_max = self.action_range
+    #     # Number of intervals is (num_of_action - 1)
+    #     # Fraction in [0, 1] if action is in [0, num_of_action-1]
+    #     fraction = action / (self.num_of_action - 1) if self.num_of_action > 1 else 0.0
+    #     scaled = action_min + fraction * (action_max - action_min)
+    #     return scaled
+    
+    #     # ====================================== #
     def scale_action(self, action):
         """
-        Maps a discrete action in range [0, n] to a continuous value in [action_min, action_max].
-
-        Args:
-            action (int): Discrete action in range [0, n].
-            n (int): Number of discrete actions (inclusive range from 0 to n).
-        
-        Returns:
-            torch.Tensor: Scaled action tensor.
+        แปลง action ดิจิทัล (index) → เป็น tensor 2D shape = [num_envs, action_dim]
+        รองรับ IsaacLab ที่ใช้ shape [N, D]
         """
-        # ========= put your code here ========= #
         action_min, action_max = self.action_range
-        # Number of intervals is (num_of_action - 1)
-        # Fraction in [0, 1] if action is in [0, num_of_action-1]
         fraction = action / (self.num_of_action - 1) if self.num_of_action > 1 else 0.0
         scaled = action_min + fraction * (action_max - action_min)
-        return scaled
-        # ====================================== #
+
+        # ✅ Return shape [1, 1] → [num_envs, action_dim]
+        return torch.tensor([[scaled]], dtype=torch.float32).to("cuda")  # หรือ .to(self.device)
+
+
     
-    def decay_epsilon(self):
+    def decay_epsilon(self ):
         """
         Decay epsilon value to reduce exploration over time.
         """
         # ========= put your code here ========= #
-        old_epsilon = self.epsilon
-        self.epsilon = max(self.final_epsilon, self.epsilon - self.epsilon_decay)
-        return self.epsilon
+        epsilon_decrease = (1.0 - self.final_epsilon) / 5000 # Calculate how much to decrease each step
+        self.epsilon = max(self.final_epsilon, self.epsilon - epsilon_decrease)
         # ====================================== #
 
     def save_w(self, path, filename):

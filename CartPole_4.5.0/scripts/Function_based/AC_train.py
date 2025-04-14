@@ -74,6 +74,7 @@ from isaaclab.envs import (
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
 from isaaclab_tasks.utils.hydra import hydra_task_config
 
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../source/CartPole")))
 # Import extensions to set up environment tasks
 import CartPole.tasks  # noqa: F401
 
@@ -106,19 +107,23 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # ========================= Can be modified ========================== #
 
     # hyperparameters
-    num_of_action = 11
+    num_of_action = 1
     action_range = [-16.0, 16.0]  # [min, max]
-    learning_rate = 0.1
-    hidden_dim = 64
-    n_episodes = 5000
-    # If your AC doesn't use epsilon-greedy, you can remove these:
-    initial_epsilon = 1.0
-    epsilon_decay = 0.997  
-    final_epsilon = 0.01
-    discount = 0.9
-    buffer_size = 1000
+    n_observations = 4
+    learning_rate = 1e-3
+    hidden_dim = 256
+    tau = 0.005
+    buffer_size = 50000
     batch_size = 64
+    discount_factor = 0.99
 
+    noise_scale_init     = 0.2
+    noise_decay          = 0.995
+
+    n_episodes = 5000
+    max_steps_per_episode = 500
+
+    num_agents = args_cli.num_envs
 
     # set up matplotlib
     is_ipython = 'inline' in matplotlib.get_backend()
@@ -138,21 +143,20 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     task_name = str(args_cli.task).split('-')[0]  # Stabilize, SwingUp
     Algorithm_name = "AC"
-
-    # agent = Actor_Critic(
-    #     device=device,
-    #     num_of_action=num_of_action,
-    #     action_range=action_range,
-    #     learning_rate=learning_rate,
-    #     hidden_dim=hidden_dim,
-    #     # initial_epsilon = initial_epsilon,
-    #     # epsilon_decay = epsilon_decay,
-    #     # final_epsilon = final_epsilon,
-    #     discount_factor = discount,
-    #     buffer_size = buffer_size,
-    #     batch_size = batch_size,
-    # )
-    agent = Actor_Critic()
+ห
+    agent = Actor_Critic(
+        device = device, 
+        num_of_action  = num_of_action,
+        action_range = action_range,
+        n_observations = n_observations,
+        hidden_dim = hidden_dim,
+        learning_rate = learning_rate,
+        tau = tau,
+        discount_factor = discount_factor,
+        buffer_size = buffer_size,
+        batch_size = batch_size,
+    )
+    # agent = Actor_Critic()
 
     config = {
         'architecture': 'HW3_DRL', #ชื่อโปรเจกต์เป็น "simpleff"
@@ -167,35 +171,40 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # reset environment
     obs, _ = env.reset()
     timestep = 0
-    sum_reward = 0
-    sum_count = 0
 
-    max_steps_per_episode = 300
+
 
     # simulate environment
     while simulation_app.is_running():
         # run everything in inference mode
         # with torch.inference_mode():
-        
+        all_rewards = []
         for episode in tqdm(range(n_episodes)):
-            total_reward = agent.learn(
-                env=env, 
-                max_steps=max_steps_per_episode, 
-                num_agents=1,       # Single-agent
-                noise_scale=0.1,    # For continuous actions, if you want noise
-                noise_decay=0.99
+            ep_reward = agent.learn(
+                env=env,
+                max_steps=max_steps_per_episode,
+                num_agents=num_agents,
+                noise_scale=noise_scale_init,
+                noise_decay=noise_decay,
             )
+            all_rewards.append(ep_reward)
+            wandb.log({"episode_reward": ep_reward}, step=episode)
 
-        if episode % 100 == 0:
-            print(agent.epsilon)
+            # ─── logging every 100 episodes ────────────────────────────────────
+            if (episode+1) % 100 == 0:
+                avg_100 = np.mean(all_rewards[-100:])
+                print(f"[Episode {episode:5d}]  AvgReward(100) = {avg_100:8.2f}")
+                wandb.log({"avg_reward_100": avg_100}, step=episode)
 
-            # Save Q-Learning agent
-            w_file = f"{Algorithm_name}_{episode}_{num_of_action}_{action_range[1]}.json"
-            full_path = os.path.join(f"w/{task_name}", Algorithm_name)
-            agent.save_w(full_path, w_file)
+                # checkpoint
+                ckpt_dir = os.path.join("weights", task_name, "AC")
+                os.makedirs(ckpt_dir, exist_ok=True)
+                ckpt_path = os.path.join(ckpt_dir, f"ep{episode}.pt")
+                torch.save(agent.actor.state_dict(), ckpt_path)
+                print(f"Checkpoint saved → {ckpt_path}")
         
         print('Training Complete')
-        agent.plot_durations(show_result=True)
+        # agent.plot_durations(show_result=True)
         plt.ioff()
         plt.show()
             
@@ -213,7 +222,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
 if __name__ == "__main__":
     # run the main function
-    main()
+    main() # type: ignore
     # close sim app
     simulation_app.close()
     wandb.finish()
