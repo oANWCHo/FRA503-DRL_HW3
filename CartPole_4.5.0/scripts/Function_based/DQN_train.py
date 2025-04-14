@@ -13,6 +13,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")
 from RL_Algorithm.Function_based.DQN import DQN
 
 from tqdm import tqdm
+import torch
+import wandb
 
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Train an RL agent with RSL-RL.")
@@ -153,6 +155,15 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         buffer_size = buffer_size,
         batch_size = batch_size,
     )
+    config = {
+        'architecture': 'HW3_DRL', 
+        'name' : 'DQN'
+    }
+    run = wandb.init(
+        project='HW3_DRL',
+
+        config=config,
+    )
 
     # reset environment
     obs, _ = env.reset()
@@ -168,27 +179,37 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             ep_reward = agent.learn(env)
             all_rewards.append(ep_reward)
             # Episode done → store total reward
+            wandb.log({"episode_reward": ep_reward}, step=episode)
 
-            # Print average reward every 100 episodes
-            if (episode + 1) % 100 == 0:
-                # compute mean of last 100
-                avg_reward = np.mean(all_rewards[-100:])
-                print(f"[Episode {episode+1:4d}]   AvgReward(Last100) = {avg_reward:.2f}   Epsilon = {agent.epsilon:.3f}")
 
             # Example checkpoint logic
             if (episode + 1) % 100 == 0:
-                w_file = f"{Algorithm_name}_ep{episode+1}.pt"
-                full_path = os.path.join("weights", task_name, Algorithm_name)
-                os.makedirs(full_path, exist_ok=True)
-                # If your DQN doesn't override save_w, do:
-                # torch.save(agent.policy_net.state_dict(), os.path.join(full_path, w_file))
-                agent.save_w(full_path, w_file)  # if you wrote a custom override
-                print(f"Checkpoint saved at ep {episode+1} → {os.path.join(full_path, w_file)}")
+
+                avg_reward = np.mean(all_rewards[-100:])
+                print(f"[Episode {episode+1:4d}]   AvgReward(Last100) = {avg_reward:.2f}   Epsilon = {agent.epsilon:.3f}")
+                wandb.log({"avg_reward_100": avg_reward}, step=episode)
+
+                num_agents = 1  # Add this
+                ckpt_dir = os.path.join("weights", task_name, "DQN")
+                os.makedirs(ckpt_dir, exist_ok=True)
+                ckpt_filename = (
+                    f"dqn_agents{num_agents}_ep{episode+1}"
+                    f"_lr{learning_rate}"
+                    f"_bs{batch_size}"
+                    f"_dis{discount_factor}"
+                    f"_τ{tau}"
+                    f"_hd{hidden_dim}.pt"
+                )
+                ckpt_path = os.path.join(ckpt_dir, ckpt_filename)
+
+                agent.save_w(ckpt_dir, ckpt_filename)
+                print(f"Checkpoint saved → {ckpt_path}")
+
 
         print("Training Complete.")
-        agent.plot_durations(show_result=True)  # if your agent uses that
-        plt.ioff()
-        plt.show()
+        # agent.plot_durations(show_result=True)  # if your agent uses that
+        # plt.ioff()
+        # plt.show()
             
         if args_cli.video:
             timestep += 1
@@ -207,3 +228,4 @@ if __name__ == "__main__":
     main()
     # close sim app
     simulation_app.close()
+    wandb.finish()

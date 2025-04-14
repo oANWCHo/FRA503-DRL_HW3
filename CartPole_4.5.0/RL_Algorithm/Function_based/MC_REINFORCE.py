@@ -1,7 +1,6 @@
 from __future__ import annotations
 import numpy as np
-from RL_Algorithm.RL_base_function_approximation import BaseAlgorithm, ControlType
-
+from RL_Algorithm.RL_base_function import BaseAlgorithm
 
 import torch
 import torch.nn as nn
@@ -15,41 +14,50 @@ import matplotlib.pyplot as plt
 
 class MC_REINFORCE_network(nn.Module):
     """
-    Neural network สำหรับ REINFORCE algorithm
-    ใช้ softmax เป็น output สำหรับสร้าง distribution ของ action
-
+    Neural network for the MC_REINFORCE algorithm.
+    
     Args:
-        n_observations (int): จำนวน features จาก state
-        hidden_size (int): จำนวน neurons ใน hidden layer
-        n_actions (int): จำนวน discrete actions
-        dropout (float): dropout สำหรับ regularization
+        n_observations (int): Number of input features.
+        hidden_size (int): Number of hidden neurons.
+        n_actions (int): Number of possible actions.
+        dropout (float): Dropout rate for regularization.
     """
 
     def __init__(self, n_observations, hidden_size, n_actions, dropout):
         super(MC_REINFORCE_network, self).__init__()
-        
-        # เลเยอร์ซ่อน: Linear + ReLU + Dropout
+        # ========= put your code here ========= #
         self.fc1 = nn.Linear(n_observations, hidden_size)
-        self.dropout = nn.Dropout(p=dropout)
-        
-        # เลเยอร์ output: ให้ค่าความน่าจะเป็นของแต่ละ action
+        self.dropout = nn.Dropout(dropout)
         self.fc2 = nn.Linear(hidden_size, n_actions)
+        # ====================================== #
 
     def forward(self, x):
         """
-        กระจายข้อมูลผ่าน network และ return ค่า probability ของ action
-
+        Forward pass through the network.
+        
         Args:
-            x (Tensor): input state
+            x (Tensor): Input tensor.
         
         Returns:
-            Tensor: softmax probabilities ของ actions
+            Tensor: Output tensor representing action probabilities.
         """
-        x = F.relu(self.fc1(x))         # เลเยอร์ซ่อน + ReLU
-        x = self.dropout(x)             # Dropout
-        x = self.fc2(x)                 # เลเยอร์ output
-        return F.softmax(x, dim=-1)     # แปลงเป็น probability ด้วย softmax
+        # ========= put your code here ========= #
+        x = F.relu(self.fc1(x))
+        x = self.dropout(x)
+        x = self.fc2(x)
 
+        # Clamp logits to prevent NaN in softmax
+        x = torch.clamp(x, -20, 20)
+
+        # Apply softmax safely
+        probs = F.softmax(x, dim=-1)
+
+        # Replace NaN with uniform fallback
+        if torch.isnan(probs).any():
+            probs = torch.ones_like(probs) / probs.shape[-1]
+
+        return probs
+        # ====================================== #
 
 class MC_REINFORCE(BaseAlgorithm):
     def __init__(
@@ -58,9 +66,9 @@ class MC_REINFORCE(BaseAlgorithm):
             num_of_action: int = 2,
             action_range: list = [-2.5, 2.5],
             n_observations: int = 4,
-            hidden_dim: int = 64,
-            dropout: float = 0.5,
-            learning_rate: float = 0.01,
+            hidden_dim: int = 256,
+            dropout: float = 0.1,
+            learning_rate: float = 0.001,
             discount_factor: float = 0.95,
     ) -> None:
         """
@@ -89,7 +97,7 @@ class MC_REINFORCE(BaseAlgorithm):
         # Experiment with different values and configurations to see how they affect the training process.
         # Remember to document any changes you make and analyze their impact on the agent's performance.
 
-        pass
+        # pass
         # ====================================== #
 
         super(MC_REINFORCE, self).__init__(
@@ -105,198 +113,143 @@ class MC_REINFORCE(BaseAlgorithm):
             from IPython import display
 
         plt.ion()
-    
+    def _unwrap_obs(self, obs):
+        """
+        Converts the observation into a flat numpy array for linear Q-learning.
+        Supports dict-style obs from Isaac Sim and Gymnasium.
+        """
+        if isinstance(obs, dict):
+            obs = obs.get("policy", obs)
+
+        # If it's a Tensor (on CUDA or CPU)
+        if isinstance(obs, torch.Tensor):
+            obs = obs.detach().cpu().numpy()
+
+        # If it's a list/tuple of tensors (just in case)
+        if isinstance(obs, (list, tuple)) and all(isinstance(x, torch.Tensor) for x in obs):
+            obs = np.concatenate([x.detach().cpu().numpy() for x in obs])
+        return np.array(obs, dtype=np.float32)  
+        
     def calculate_stepwise_returns(self, rewards):
         """
-        คำนวณ return แบบสะสมย้อนหลัง (G_t = r_t + γ*r_{t+1} + ...)
+        Compute stepwise returns for the trajectory.
 
         Args:
-            rewards (list): รางวัลในแต่ละ timestep ของ episode
-            
+            rewards (list): List of rewards obtained in the episode.
+        
         Returns:
-            Tensor: ค่า return สำหรับแต่ละ timestep (normalize แล้ว)
+            Tensor: Normalized stepwise returns.
         """
-        R = 0
+        # ========= put your code here ========= #
+        G = 0
         returns = []
-        
-        # วนย้อนกลับจากท้ายสุด → คำนวณ return สะสมแบบ discount
         for r in reversed(rewards):
-            R = r + self.discount_factor * R
-            returns.insert(0, R)  # ใส่ไว้ข้างหน้าตามลำดับเวลา
-
-        returns = torch.tensor(returns, dtype=torch.float32).to(self.device)
-        
-        # Normalize เพื่อช่วยให้ training เสถียรขึ้น
-        returns = (returns - returns.mean()) / (returns.std() + 1e-9)
-
+            G = r + self.discount_factor * G
+            returns.insert(0, G)
+        returns = torch.tensor(returns, dtype=torch.float32)
+        if returns.numel() > 1:
+            returns = (returns - returns.mean()) / (returns.std() + 1e-8)  # normalize
         return returns
+        # ====================================== #
 
-
-    # def generate_trajectory(self, env):
-    #     """
-    #     Generate a trajectory by interacting with the environment.
-
-    #     Args:
-    #         env: The environment object.
-        
-    #     Returns:
-    #         Tuple: (episode_return, stepwise_returns, log_prob_actions, trajectory)
-    #     """
-    #     # ===== Initialize trajectory collection variables ===== #
-    #     # Reset environment to get initial state (tensor)
-    #     # Store state-action-reward history (list)
-    #     # Store log probabilities of actions (list)
-    #     # Store rewards at each step (list)
-    #     # Track total episode return (float)
-    #     # Flag to indicate episode termination (boolean)
-    #     # Step counter (int)
-    #     # ========= put your code here ========= #
-    #     pass
-    #     # ====================================== #
-        
-    #     # ===== Collect trajectory through agent-environment interaction ===== #
-    #     while not done:
-            
-    #         # Predict action from the policy network
-    #         # ========= put your code here ========= #
-    #         pass
-    #         # ====================================== #
-
-    #         # Execute action in the environment and observe next state and reward
-    #         # ========= put your code here ========= #
-    #         pass
-    #         # ====================================== #
-
-    #         # Store action log probability reward and trajectory history
-    #         # ========= put your code here ========= #
-    #         pass
-    #         # ====================================== #
-            
-    #         # Update state
-
-    #         timestep += 1
-    #         if done:
-    #             self.plot_durations(timestep)
-    #             break
-
-    #     # ===== Stack log_prob_actions &  stepwise_returns ===== #
-    #     # ========= put your code here ========= #
-    #     pass
-    #     # ====================================== #
     def generate_trajectory(self, env):
         """
-        เล่น 1 episode และเก็บข้อมูล trajectory:
-        - log_prob ของ actions
-        - รางวัล
-        - state-action ทั้งหมด
+        Generate a trajectory by interacting with the environment.
 
+        Args:
+            env: The environment object.
+        
         Returns:
-            Tuple: (ผลรวมรางวัล, stepwise_returns, log_probs, trajectory)
+            Tuple: (episode_return, stepwise_returns, log_prob_actions, trajectory)
         """
-        obs_dict = env.reset()
-        obs = obs_dict["policy"].squeeze()
-        obs = torch.tensor(obs, dtype=torch.float32).to(self.device)
+        # ===== Initialize trajectory collection variables ===== #
+        # Reset environment to get initial state (tensor)
+        # Store state-action-reward history (list)
+        # Store log probabilities of actions (list)
+        # Store rewards at each step (list)
+        # Track total episode return (float)
+        # Flag to indicate episode termination (boolean)
+        # Step counter (int)
+        # ========= put your code here ========= #
+        state, _ = env.reset()
+        state = self._unwrap_obs(state)
+        state = torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
 
-        trajectory = []           # เก็บ (s, a, r)
-        log_probs = []            # เก็บ log(action_prob)
-        rewards = []              # เก็บรางวัล
-        episode_return = 0.0
+        rewards = []
+        log_probs = []
+        trajectory = []
+        ep_return = 0.0
         done = False
         timestep = 0
 
         while not done:
-            probs = self.policy_net(obs)                          # softmax ของ action
-            dist = distributions.Categorical(probs)               # สร้าง distribution
-            action = dist.sample()                                # sample action
-            log_prob = dist.log_prob(action)                      # log prob ของ action
-
-            continuous_action = self.scale_action(action.item())  # แปลง action index เป็นค่า
-            next_obs_dict, reward, done, _ = env.step(continuous_action)
-            next_obs = next_obs_dict["policy"].squeeze()
-            next_obs = torch.tensor(next_obs, dtype=torch.float32).to(self.device)
-
-            # บันทึกทุกอย่าง
-            trajectory.append((obs, action, reward))
+            probs = self.policy_net(state)  # Output: [1, num_actions], requires grad
+            dist = torch.distributions.Categorical(probs)
+            action = dist.sample()
+            log_prob = dist.log_prob(action)  # shape: [1]
+            
             log_probs.append(log_prob)
-            rewards.append(reward)
-            episode_return += reward
 
-            obs = next_obs
+            action_tensor = torch.tensor([[action.item()]], dtype=torch.int64)
+            next_state, reward, terminated, truncated, _ = env.step(action_tensor)
+            done = terminated or truncated
+
+            r = reward.item() if isinstance(reward, torch.Tensor) else float(reward)
+            rewards.append(r)
+            ep_return += r
+            trajectory.append((state, action))
+
+            state = self._unwrap_obs(next_state)
+            state = torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
             timestep += 1
 
-            if done:
-                self.plot_durations(timestep)
-                break
-
-        # คำนวณ return ย้อนหลังแบบ normalized
-        stepwise_returns = self.calculate_stepwise_returns(rewards)
         log_probs = torch.stack(log_probs)
+        log_probs = log_probs.to(self.device)
+        log_probs.requires_grad_()  # Make sure gradient tracking is enabled
 
-        return episode_return, stepwise_returns, log_probs, trajectory
+        returns = self.calculate_stepwise_returns(rewards)
 
+        return ep_return, returns.to(self.device), log_probs, trajectory
+        # ====================================== #
     
-    # def calculate_loss(self, stepwise_returns, log_prob_actions):
-    #     """
-    #     Compute the loss for policy optimization.
-
-    #     Args:
-    #         stepwise_returns (Tensor): Stepwise returns for the trajectory.
-    #         log_prob_actions (Tensor): Log probabilities of actions taken.
-        
-    #     Returns:
-    #         Tensor: Computed loss.
-    #     """
-    #     # ========= put your code here ========= #
-    #     pass
-    #     # ====================================== #
-
     def calculate_loss(self, stepwise_returns, log_prob_actions):
         """
-        คำนวณ policy gradient loss:
-            loss = - ∑ logπ(a|s) * G_t
+        Compute the loss for policy optimization.
 
         Args:
-            stepwise_returns (Tensor): Return ของแต่ละ timestep
-            log_prob_actions (Tensor): log ของ prob ที่เลือก action
-
-        Returns:
-            Tensor: ค่าผลรวม loss
-        """
-        return -torch.sum(log_prob_actions * stepwise_returns)
-
-
-    # def update_policy(self, stepwise_returns, log_prob_actions):
-    #     """
-    #     Update the policy using the calculated loss.
-
-    #     Args:
-    #         stepwise_returns (Tensor): Stepwise returns.
-    #         log_prob_actions (Tensor): Log probabilities of actions taken.
+            stepwise_returns (Tensor): Stepwise returns for the trajectory.
+            log_prob_actions (Tensor): Log probabilities of actions taken.
         
-    #     Returns:
-    #         float: Loss value after the update.
-    #     """
-    #     # ========= put your code here ========= #
-    #     pass
-    #     # ====================================== #
-    
-    def update_policy(self, stepwise_returns, log_prob_actions):
+        Returns:
+            Tensor: Computed loss.
         """
-        อัปเดต policy ด้วย gradient descent
+        # ========= put your code here ========= #
+        return -(stepwise_returns * log_prob_actions).sum()
+        # ====================================== #
+
+    def update_policy(self, returns, log_prob_actions):
+        """
+        Update the policy using the calculated loss.
 
         Args:
-            stepwise_returns (Tensor): Return ที่ normalize แล้ว
-            log_prob_actions (Tensor): log ของ prob ที่เลือก action
-
+            stepwise_returns (Tensor): Stepwise returns.
+            log_prob_actions (Tensor): Log probabilities of actions taken.
+        
         Returns:
-            float: ค่าความสูญเสีย (loss)
+            float: Loss value after the update.
         """
-        loss = self.calculate_loss(stepwise_returns, log_prob_actions)
+        # ========= put your code here ========= #
+        loss = -(returns * log_prob_actions).sum()
+
+        # print("loss.requires_grad =", loss.requires_grad)  # Should be True
+        # print("log_prob_actions.requires_grad =", log_prob_actions.requires_grad)
+
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
-        return loss.item()
 
+        return loss.item()
+        # ====================================== #
     
     def learn(self, env):
         """

@@ -413,7 +413,7 @@ class DQN(BaseAlgorithm):
             state = next_state
             timestep += 1
             if done:
-                self.plot_durations(timestep)
+                # self.plot_durations(timestep)
                 self.decay_epsilon()
                 return total_reward
 

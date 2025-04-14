@@ -143,7 +143,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     task_name = str(args_cli.task).split('-')[0]  # Stabilize, SwingUp
     Algorithm_name = "AC"
-ห
+
     agent = Actor_Critic(
         device = device, 
         num_of_action  = num_of_action,
@@ -156,10 +156,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         buffer_size = buffer_size,
         batch_size = batch_size,
     )
-    # agent = Actor_Critic()
+
 
     config = {
-        'architecture': 'HW3_DRL', #ชื่อโปรเจกต์เป็น "simpleff"
+        'architecture': 'HW3_DRL', 
         'name' : 'AC'
     }
     run = wandb.init(
@@ -188,18 +188,26 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 noise_decay=noise_decay,
             )
             all_rewards.append(ep_reward)
-            wandb.log({"episode_reward": ep_reward}, step=episode)
+            wandb.log({"episode_reward": ep_reward/num_agents}, step=episode)
 
             # ─── logging every 100 episodes ────────────────────────────────────
             if (episode+1) % 100 == 0:
-                avg_100 = np.mean(all_rewards[-100:])
+                avg_100 = np.mean(all_rewards[-100:])/num_agents
                 print(f"[Episode {episode:5d}]  AvgReward(100) = {avg_100:8.2f}")
                 wandb.log({"avg_reward_100": avg_100}, step=episode)
 
                 # checkpoint
                 ckpt_dir = os.path.join("weights", task_name, "AC")
                 os.makedirs(ckpt_dir, exist_ok=True)
-                ckpt_path = os.path.join(ckpt_dir, f"ep{episode}.pt")
+                ckpt_filename = (
+                    f"ac_agents{num_agents}_ep{episode}"
+                    f"_lr{learning_rate}"
+                    f"_bs{batch_size}"
+                    f"_dis{discount_factor}"
+                    f"_τ{tau}"
+                    f"_hd{hidden_dim}.pt"
+                )
+                ckpt_path = os.path.join(ckpt_dir, ckpt_filename)
                 torch.save(agent.actor.state_dict(), ckpt_path)
                 print(f"Checkpoint saved → {ckpt_path}")
         

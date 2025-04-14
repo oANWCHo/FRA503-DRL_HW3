@@ -106,13 +106,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     num_of_action = 5
     action_range = [-16.0, 16.0]
     learning_rate = 0.01
-    n_episodes = 5000
     initial_epsilon = 1.0
     epsilon_decay = 0.997
     final_epsilon = 0.05
     discount = 0.95
     buffer_size = 1000
     batch_size = 8
+    n_episodes = 5000
+    max_steps = 500
 
 
     # set up matplotlib
@@ -142,41 +143,61 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         epsilon_decay=epsilon_decay,
         final_epsilon=final_epsilon,
         discount_factor=discount,
-        buffer_size=buffer_size,
-        batch_size=batch_size,
     )
-
     episode_returns = []
     
+
     config = {
-        'architecture': 'HW3_DRL', #ชื่อโปรเจกต์เป็น "simpleff"
-        'name' : 'AC'
+        'architecture': 'HW3_DRL', 
+        'name' : 'Linear_Q'
     }
     run = wandb.init(
         project='HW3_DRL',
 
         config=config,
     )
-    for episode in tqdm(range(n_episodes)):
-        episode_return = agent.learn(env, max_steps=500)
-        episode_returns.append(episode_return)
 
-        if episode % 100 == 0:
-            # Save model weights
-            print(f"[Episode {episode}] Return = {float(episode_return):.2f}, Epsilon = {agent.epsilon:.4f}")
-            model_dir = os.path.join("w", task_name, Algorithm_name)
-            os.makedirs(model_dir, exist_ok=True)
-            w_file = f"{Algorithm_name}_{episode}_{num_of_action}_{action_range[1]}.npy"
-            agent.save_w(model_dir, w_file)
+    obs, _ = env.reset()
+    timestep = 0
+    all_rewards = []
+    # Outer loop: while simulation is running
+    while simulation_app.is_running():
 
-    print('Training complete.')
-    agent.plot_durations(show_result=True)
-    plt.ioff()
-    plt.show()
+        for episode in tqdm(range(n_episodes)):
+            ep_reward = agent.learn(env, max_steps=max_steps)
+            all_rewards.append(ep_reward)
+            wandb.log({"episode_reward": ep_reward, "epsilon": agent.epsilon}, step = episode)
 
-    if args_cli.video:
-        print("Video mode active – stopping at end of video length.")
-    env.close()
+            if (episode + 1) % 100 == 0:
+                avg_reward = np.mean(all_rewards[-100:])
+                print(f"[Episode {episode+1:4d}]   AvgReward(Last100) = {avg_reward:.2f}   Epsilon = {agent.epsilon:.3f}")
+                wandb.log({"avg_reward_100": avg_reward}, step=episode)
+
+                ckpt_dir = os.path.join("weights", task_name, "LinearQ")
+                os.makedirs(ckpt_dir, exist_ok=True)
+                ckpt_filename = (
+                    f"ep{episode+1}"
+                    f"_lr{learning_rate}"
+                    f"_bs{batch_size}"
+                    f"_dis{discount}.npy"
+                )
+                ckpt_path = os.path.join(ckpt_dir, ckpt_filename)
+
+                agent.save_w(ckpt_dir, ckpt_filename)
+                print(f"Checkpoint saved → {ckpt_path}")
+
+        print('Training complete.')
+            # agent.plot_durations(show_result=True)
+            # plt.ioff()
+            # plt.show()
+
+        if args_cli.video:
+            timestep += 1
+            # Exit the play loop after recording one video
+            if timestep == args_cli.video_length:
+                break
+
+        break
 
 if __name__ == "__main__":
     main()

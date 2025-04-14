@@ -123,14 +123,17 @@ class BaseAlgorithm():
     def q(self, obs, a=None):
         """Returns the linearly-estimated Q-value for a given state and action."""
         # ========= put your code here ========= #
-        observation = np.array(obs)
+        if isinstance(obs, dict) and "policy" in obs:
+            obs = obs["policy"]
+        if isinstance(obs, torch.Tensor):
+            obs = obs.detach().cpu().numpy()
 
-        if a == None:
-            # Get q values from all action in state
-            return obs.dot(self.w)
+        obs = np.array(obs, dtype=np.float32)
+
+        if a is not None:
+            return float(obs.dot(self.w[:, a]))
         else:
-            # Get q values given action & state
-            return obs.dot(self.w[:,a])
+            return obs.dot(self.w)
         # ====================================== #
         
     
