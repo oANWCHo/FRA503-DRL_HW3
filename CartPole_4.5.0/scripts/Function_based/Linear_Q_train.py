@@ -104,16 +104,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     # hyperparameters
     num_of_action = 5
-    action_range = [-16.0, 16.0]
-    learning_rate = 0.01
+    action_range = [-15.0, 15.0]
+    learning_rate = 0.005
     initial_epsilon = 1.0
-    epsilon_decay = 0.997
-    final_epsilon = 0.05
-    discount = 0.95
-    buffer_size = 1000
-    batch_size = 8
-    n_episodes = 5000
-    max_steps = 500
+    epsilon_decay = 0.9997
+    final_epsilon = 0.01
+    discount = 0.99
+    n_episodes = 10000
+    max_steps = 2000
 
 
     # set up matplotlib
@@ -159,10 +157,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     obs, _ = env.reset()
     timestep = 0
-    all_rewards = []
+    
     # Outer loop: while simulation is running
     while simulation_app.is_running():
 
+        all_rewards = []
         for episode in tqdm(range(n_episodes)):
             ep_reward = agent.learn(env, max_steps=max_steps)
             all_rewards.append(ep_reward)
@@ -176,9 +175,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 ckpt_dir = os.path.join("weights", task_name, "LinearQ")
                 os.makedirs(ckpt_dir, exist_ok=True)
                 ckpt_filename = (
-                    f"ep{episode+1}"
+                    f"ep{episode}"
                     f"_lr{learning_rate}"
-                    f"_bs{batch_size}"
+                    f"_na{num_of_action}"
+                    f"_acr{action_range[1]}"
+                    f"_ms{max_steps}"
                     f"_dis{discount}.npy"
                 )
                 ckpt_path = os.path.join(ckpt_dir, ckpt_filename)

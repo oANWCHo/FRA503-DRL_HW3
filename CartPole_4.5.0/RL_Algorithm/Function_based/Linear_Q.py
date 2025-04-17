@@ -131,7 +131,7 @@ class Linear_QN(BaseAlgorithm):
         """
 
         # ===== Initialize trajectory collection variables ===== #
-        # Reset environment to get initial state (tensor)
+        # Reset environment to get initial state (tensor)ผ
         # Track total episode return (float)
         # Flag to indicate episode termination (boolean)
         # Step counter (int)
@@ -152,7 +152,7 @@ class Linear_QN(BaseAlgorithm):
             
 
             if done:
-                self.decay_epsilon()
+                self.decay_epsilon(3000)
                 break
 
         return float(ep_ret)

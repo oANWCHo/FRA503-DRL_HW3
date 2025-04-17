@@ -110,18 +110,20 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     num_of_action = 1
     action_range = [-16.0, 16.0]  # [min, max]
     n_observations = 4
-    learning_rate = 1e-3
-    hidden_dim = 256
-    tau = 0.005
-    buffer_size = 50000
-    batch_size = 64
-    discount_factor = 0.99
+    learning_rate = 0.001 #0.0005
+    hidden_dim = 64 #64 128
+    tau = 0.005 #0.001 0.01
+    buffer_size = 5000 #5000 7000 3000 
+
+
+    batch_size = 64 #64 128 256
+    discount_factor = 0.99 #0.1
 
     noise_scale_init     = 0.2
     noise_decay          = 0.995
 
-    n_episodes = 5000
-    max_steps_per_episode = 500
+    n_episodes = 10000
+    max_steps_per_episode = 1000
 
     num_agents = args_cli.num_envs
 
@@ -179,8 +181,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         # run everything in inference mode
         # with torch.inference_mode():
         all_rewards = []
+        all_a_loss = []
+        all_c_loss = []
         for episode in tqdm(range(n_episodes)):
-            ep_reward = agent.learn(
+            ep_reward,a_loss,c_loss = agent.learn(
                 env=env,
                 max_steps=max_steps_per_episode,
                 num_agents=num_agents,
@@ -188,13 +192,30 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 noise_decay=noise_decay,
             )
             all_rewards.append(ep_reward)
-            wandb.log({"episode_reward": ep_reward/num_agents}, step=episode)
+            if a_loss is not None:
+                all_a_loss.append(a_loss)
+
+            if c_loss is not None:
+                all_c_loss.append(c_loss) 
+                                            
+                                        
+            wandb.log({
+                        "episode_reward": ep_reward/num_agents,
+                        "actor_loss": a_loss if a_loss is not None else 0.0,
+                        "critic_loss": c_loss if c_loss is not None else 0.0
+                    }, step=episode)
 
             # ─── logging every 100 episodes ────────────────────────────────────
             if (episode+1) % 100 == 0:
-                avg_100 = np.mean(all_rewards[-100:])/num_agents
-                print(f"[Episode {episode:5d}]  AvgReward(100) = {avg_100:8.2f}")
-                wandb.log({"avg_reward_100": avg_100}, step=episode)
+                avg_reward = np.mean(all_rewards[-100:])/num_agents
+                avg_a_loss = np.mean(all_a_loss[-100:])
+                avg_c_loss = np.mean(all_c_loss[-100:])
+                print(f"[Episode {episode:5d}]  AvgReward(100) = {avg_reward:8.2f}")
+                wandb.log({
+                    "avg_reward_100": avg_reward,
+                    "avg_actor_loss_100": avg_a_loss,
+                    "avg_critic_loss_100": avg_c_loss
+                    },  step=episode)
 
                 # checkpoint
                 ckpt_dir = os.path.join("weights", task_name, "AC")

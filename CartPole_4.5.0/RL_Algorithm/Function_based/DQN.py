@@ -338,6 +338,8 @@ class DQN(BaseAlgorithm):
         loss.backward()
         nn.utils.clip_grad_norm_(self.policy_net.parameters(), 1.0)
         self.optimizer.step()
+
+        return loss.item()
         # ====================================== #
 
     def update_target_networks(self):
@@ -380,13 +382,14 @@ class DQN(BaseAlgorithm):
         total_reward = 0.0
         done = False
         timestep = 0
+        last_loss = None
         # ====================================== #
 
         while not done:
             # Predict action from the policy network
             # ========= put your code here ========= #
             action = self.select_action(state)          # int ∈ [0, num_actions)
-            action_tensor = torch.tensor([[action]], dtype=torch.int64)
+            action_tensor = torch.tensor([[action]], dtype=torch.int64) # Convert to tensor
             # ====================================== #
 
             # Execute action in the environment and observe next state and reward
@@ -397,7 +400,7 @@ class DQN(BaseAlgorithm):
 
             # Store the transition in memory
             # ========= put your code here ========= #
-            self.memory.add(state, action, reward, next_state, done)
+            self.memory.add(state, action, reward, next_state, done) # replay buffer
 
             total_reward += float(reward.item())
             # ====================================== #
@@ -405,17 +408,19 @@ class DQN(BaseAlgorithm):
             # Update state
 
             # Perform one step of the optimization (on the policy network)
-            self.update_policy()
+            loss = self.update_policy()
+            last_loss = loss
 
             # Soft update of the target network's weights
             self.update_target_networks()
 
             state = next_state
             timestep += 1
+            # self.decay_epsilon(5000)
             if done:
                 # self.plot_durations(timestep)
-                self.decay_epsilon()
-                return total_reward
+                self.decay_epsilon(5000)
+                return total_reward, last_loss
 
     # Consider modifying this function to visualize other aspects of the training process.
     # ================================================================================== #

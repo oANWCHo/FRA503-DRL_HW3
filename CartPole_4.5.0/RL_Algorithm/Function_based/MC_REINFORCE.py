@@ -152,6 +152,66 @@ class MC_REINFORCE(BaseAlgorithm):
         return returns
         # ====================================== #
 
+    # def generate_trajectory(self, env):
+    #     """
+    #     Generate a trajectory by interacting with the environment.
+
+    #     Args:
+    #         env: The environment object.
+        
+    #     Returns:
+    #         Tuple: (episode_return, stepwise_returns, log_prob_actions, trajectory)
+    #     """
+    #     # ===== Initialize trajectory collection variables ===== #
+    #     # Reset environment to get initial state (tensor)
+    #     # Store state-action-reward history (list)
+    #     # Store log probabilities of actions (list)
+    #     # Store rewards at each step (list)
+    #     # Track total episode return (float)
+    #     # Flag to indicate episode termination (boolean)
+    #     # Step counter (int)
+    #     # ========= put your code here ========= #
+    #     state, _ = env.reset()
+    #     state = self._unwrap_obs(state)
+    #     state = torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
+
+    #     rewards = []
+    #     log_probs = []
+    #     trajectory = []
+    #     ep_return = 0.0
+    #     done = False
+    #     timestep = 0
+
+    #     while not done:
+    #         probs = self.policy_net(state)  # Output: [1, num_actions], requires grad
+    #         dist = torch.distributions.Categorical(probs)
+    #         action = dist.sample()
+    #         log_prob = dist.log_prob(action)  # shape: [1]
+            
+    #         log_probs.append(log_prob)
+
+    #         action_tensor = torch.tensor([[action.item()]], dtype=torch.int64)
+    #         next_state, reward, terminated, truncated, _ = env.step(action_tensor)
+    #         done = terminated or truncated
+
+    #         r = reward.item() if isinstance(reward, torch.Tensor) else float(reward)
+    #         rewards.append(r)
+    #         ep_return += r
+    #         trajectory.append((state, action))
+
+    #         state = self._unwrap_obs(next_state)
+    #         state = torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
+    #         timestep += 1
+
+    #     log_probs = torch.stack(log_probs)
+    #     log_probs = log_probs.to(self.device)
+    #     # log_probs.requires_grad_()  # Make sure gradient tracking is enabled  NINGGGGGGGGGGGGGGGGGGGGGGGGGGGG
+
+    #     returns = self.calculate_stepwise_returns(rewards)
+
+    #     return ep_return, returns.to(self.device), log_probs, trajectory
+        # ====================================== #
+
     def generate_trajectory(self, env):
         """
         Generate a trajectory by interacting with the environment.
@@ -160,17 +220,13 @@ class MC_REINFORCE(BaseAlgorithm):
             env: The environment object.
         
         Returns:
-            Tuple: (episode_return, stepwise_returns, log_prob_actions, trajectory)
+            Tuple:
+                - episode_return (float): Total reward in the episode
+                - stepwise_returns (Tensor): Discounted normalized returns
+                - log_prob_actions (Tensor): Log probabilities of actions
+                - trajectory (list): List of (state, action) tuples
+                - probs (Tensor): Action probability distributions for entropy regularization
         """
-        # ===== Initialize trajectory collection variables ===== #
-        # Reset environment to get initial state (tensor)
-        # Store state-action-reward history (list)
-        # Store log probabilities of actions (list)
-        # Store rewards at each step (list)
-        # Track total episode return (float)
-        # Flag to indicate episode termination (boolean)
-        # Step counter (int)
-        # ========= put your code here ========= #
         state, _ = env.reset()
         state = self._unwrap_obs(state)
         state = torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
@@ -178,17 +234,19 @@ class MC_REINFORCE(BaseAlgorithm):
         rewards = []
         log_probs = []
         trajectory = []
+        probs_list = []  # NEW: store action probs for each step
         ep_return = 0.0
         done = False
         timestep = 0
 
         while not done:
-            probs = self.policy_net(state)  # Output: [1, num_actions], requires grad
+            probs = self.policy_net(state)  # [1, num_actions]
             dist = torch.distributions.Categorical(probs)
             action = dist.sample()
             log_prob = dist.log_prob(action)  # shape: [1]
-            
+
             log_probs.append(log_prob)
+            probs_list.append(probs)  # NEW: store current action probs
 
             action_tensor = torch.tensor([[action.item()]], dtype=torch.int64)
             next_state, reward, terminated, truncated, _ = env.step(action_tensor)
@@ -203,29 +261,50 @@ class MC_REINFORCE(BaseAlgorithm):
             state = torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
             timestep += 1
 
-        log_probs = torch.stack(log_probs)
-        log_probs = log_probs.to(self.device)
-        log_probs.requires_grad_()  # Make sure gradient tracking is enabled
+        # Stack into tensors
+        log_probs = torch.stack(log_probs).to(self.device)           # shape: [T]
+        probs = torch.cat(probs_list, dim=0).to(self.device)         # shape: [T, num_actions]
 
+        # Compute discounted normalized returns
         returns = self.calculate_stepwise_returns(rewards)
 
-        return ep_return, returns.to(self.device), log_probs, trajectory
-        # ====================================== #
+        return ep_return, returns.to(self.device), log_probs, trajectory, probs
+
     
-    def calculate_loss(self, stepwise_returns, log_prob_actions):
+    # def calculate_loss(self, stepwise_returns, log_prob_actions):
+    #     """
+    #     Compute the loss for policy optimization.
+
+    #     Args:
+    #         stepwise_returns (Tensor): Stepwise returns for the trajectory.
+    #         log_prob_actions (Tensor): Log probabilities of actions taken.
+        
+    #     Returns:
+    #         Tensor: Computed loss.
+    #     """
+    #     # ========= put your code here ========= #
+    #     return -(stepwise_returns * log_prob_actions).sum()
+    #     # ====================================== #
+    def calculate_loss(self, stepwise_returns, log_prob_actions, probs, entropy_coeff=0.01):
         """
-        Compute the loss for policy optimization.
+        Compute the REINFORCE loss with optional entropy regularization.
 
         Args:
-            stepwise_returns (Tensor): Stepwise returns for the trajectory.
-            log_prob_actions (Tensor): Log probabilities of actions taken.
-        
-        Returns:
-            Tensor: Computed loss.
+            stepwise_returns (Tensor): Discounted returns per step.
+            log_prob_actions (Tensor): Log-probabilities of actions taken.
+            probs (Tensor): Action probabilities at each step.
+            entropy_coeff (float): Coefficient to encourage exploration.
         """
-        # ========= put your code here ========= #
-        return -(stepwise_returns * log_prob_actions).sum()
-        # ====================================== #
+        # Loss term from REINFORCE
+        reinforce_loss = -(stepwise_returns * log_prob_actions).sum()
+
+        # Entropy of policy: -sum(p * log(p)) over all actions
+        entropy = -torch.sum(probs * torch.log(probs + 1e-8), dim=-1).sum()
+
+        # Combine both losses
+        total_loss = reinforce_loss - entropy_coeff * entropy
+        return total_loss
+
 
     def update_policy(self, returns, log_prob_actions):
         """
@@ -263,8 +342,11 @@ class MC_REINFORCE(BaseAlgorithm):
         """
         # ========= put your code here ========= #
         self.policy_net.train()
-        episode_return, stepwise_returns, log_prob_actions, trajectory = self.generate_trajectory(env)
-        loss = self.update_policy(stepwise_returns, log_prob_actions)
+        # episode_return, stepwise_returns, log_prob_actions, trajectory = self.generate_trajectory(env)
+        # loss = self.update_policy(stepwise_returns, log_prob_actions)
+        episode_return, stepwise_returns, log_prob_actions, trajectory, probs = self.generate_trajectory(env)
+        loss = self.calculate_loss(stepwise_returns, log_prob_actions, probs)
+
         return episode_return, loss, trajectory
         # ====================================== #
 

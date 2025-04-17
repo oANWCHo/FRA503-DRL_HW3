@@ -171,12 +171,12 @@ class BaseAlgorithm():
 
 
     
-    def decay_epsilon(self ):
+    def decay_epsilon(self, time_step):
         """
         Decay epsilon value to reduce exploration over time.
         """
         # ========= put your code here ========= #
-        epsilon_decrease = (1.0 - self.final_epsilon) / 5000 # Calculate how much to decrease each step
+        epsilon_decrease = (1.0 - self.final_epsilon) / time_step # Calculate how much to decrease each step
         self.epsilon = max(self.final_epsilon, self.epsilon - epsilon_decrease)
         # ====================================== #
 

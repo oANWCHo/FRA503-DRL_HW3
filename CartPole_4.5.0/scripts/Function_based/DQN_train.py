@@ -104,21 +104,26 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # ========================= Can be modified ========================== #
 
     # hyperparameters
-    num_of_action = 2
-    action_range = [-16.0, 16.0]
-    n_observations = 4
-    hidden_dim = 128
-    dropout = 0.0
-    learning_rate = 0.001
-    tau = 0.001
-    initial_epsilon = 1.0
-    epsilon_decay = 0.995
-    final_epsilon = 0.01
-    discount_factor = 0.99
-    buffer_size = 50000
-    batch_size = 64
+    num_of_action = 5
+    action_range = [-25.0, 25.0]
 
-    n_episodes = 5000
+    n_observations = 4
+    hidden_dim = 4 #4 64 128 256 
+    dropout = 0.0
+
+    learning_rate = 0.0005
+    tau = 0.001 
+
+    initial_epsilon = 1.0
+    epsilon_decay = 0.9997
+    final_epsilon = 0.01
+
+    discount_factor = 0.99
+
+    buffer_size = 50000
+    batch_size = 512  
+
+    n_episodes = 10000
 
     # set up matplotlib
     is_ipython = 'inline' in matplotlib.get_backend()
@@ -169,6 +174,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     obs, _ = env.reset()
     timestep = 0
     all_rewards = []
+    all_loss = []
 
     # Outer loop: while simulation is running
     while simulation_app.is_running():
@@ -176,24 +182,35 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         # for each episode
         for episode in tqdm(range(n_episodes), desc="Episode"):
             # reset environment for this new episode
-            ep_reward = agent.learn(env)
+            ep_reward, ep_loss = agent.learn(env)
             all_rewards.append(ep_reward)
+                        
+            if ep_loss is not None:
+                all_loss.append(ep_loss)
             # Episode done → store total reward
-            wandb.log({"episode_reward": ep_reward}, step=episode)
+            # print(ep_loss)
+            wandb.log({
+                        "episode_reward": ep_reward,
+                        "episode_loss": ep_loss if ep_loss is not None else 0.0,
+                         "epsilon": agent.epsilon
+                    }, step=episode)
 
 
             # Example checkpoint logic
             if (episode + 1) % 100 == 0:
 
                 avg_reward = np.mean(all_rewards[-100:])
+                avg_loss = np.mean(all_loss[-100:])
                 print(f"[Episode {episode+1:4d}]   AvgReward(Last100) = {avg_reward:.2f}   Epsilon = {agent.epsilon:.3f}")
-                wandb.log({"avg_reward_100": avg_reward}, step=episode)
+                wandb.log({
+                    "avg_reward_100": avg_reward,
+                    "avg_loss_100": avg_loss
+                    },  step=episode)
 
-                num_agents = 1  # Add this
                 ckpt_dir = os.path.join("weights", task_name, "DQN")
                 os.makedirs(ckpt_dir, exist_ok=True)
                 ckpt_filename = (
-                    f"dqn_agents{num_agents}_ep{episode+1}"
+                    f"dqn_na{num_of_action}_ep{episode+1}"
                     f"_lr{learning_rate}"
                     f"_bs{batch_size}"
                     f"_dis{discount_factor}"

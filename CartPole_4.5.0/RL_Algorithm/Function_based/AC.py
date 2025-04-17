@@ -343,7 +343,7 @@ class Actor_Critic(BaseAlgorithm):
         critic = self.mse(q, q_tgt)
 
         actor  = -self.critic(states, self.actor(states)).mean()
-        return critic, actor
+        return critic.item(), actor.item()
         # ====================================== #
 
     def update_policy(self):
@@ -357,7 +357,7 @@ class Actor_Critic(BaseAlgorithm):
         """One gradient step for critic then actor (no in‑place clash)."""
         batch = self.generate_sample(self.batch_size)
         if batch is None:
-            return
+            return None,None
 
         states, actions, rewards, next_states, dones = batch
         rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-7)
@@ -391,6 +391,7 @@ class Actor_Critic(BaseAlgorithm):
             for t, s in zip(self.critic_target.parameters(), self.critic.parameters()):
                 t.data.mul_(1 - self.tau).add_(self.tau * s.data)
 
+        return actor_loss.item(),critic_loss.item()
         # ====================================== #
 
 
@@ -434,14 +435,13 @@ class Actor_Critic(BaseAlgorithm):
         # ========= put your code here ========= #
         state, _ = env.reset()
 
-        # 🔓 unwrap 'policy' key if needed
         if isinstance(state, dict) and 'policy' in state:
             state = state['policy']
 
         ep_ret = 0.0
         noise = noise_scale
-        ep_ret = 0.0
-        noise = noise_scale
+        last_a_loss = None
+        last_c_loss = None
 
         for _ in range(max_steps):
             act_scaled_list, act_raw_list = [], []
@@ -477,7 +477,10 @@ class Actor_Critic(BaseAlgorithm):
                 )
                 ep_ret += r
 
-            self.update_policy()
+            a_loss, c_loss = self.update_policy()
+            if a_loss is not None and c_loss is not None:
+                last_a_loss = a_loss
+                last_c_loss = c_loss
             state = next_state
             noise *= noise_decay
 
@@ -485,4 +488,4 @@ class Actor_Critic(BaseAlgorithm):
                 break
 
 
-        return float(ep_ret)
+        return float(ep_ret), last_a_loss, last_c_loss

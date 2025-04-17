@@ -104,14 +104,16 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
 
     # Hyperparameters
-    num_of_action = 11
-    action_range = [-16.0, 16.0]
-    n_observations = 4
-    hidden_dim = 256
-    learning_rate = 0.001
-    dropout = 0.1
+    num_of_action = 5 #  if num_of_ac end please run [-2.5,2.5] num_ac 2
+    action_range = [-7, 7] 
+    n_observations = 4 # Fix
+
+    hidden_dim = 128 #64 256 
+    learning_rate = 0.005  
+    dropout = 0.0
     discount_factor = 0.99
-    n_episodes = 5000
+
+    n_episodes = 10000
 
     task_name = str(args_cli.task).split('-')[0]  # เช่น Stabilize
 
@@ -142,20 +144,36 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     )
     while simulation_app.is_running():
         all_rewards = []
+        all_loss = []
         for episode in tqdm(range(n_episodes)):
-            ep_return, loss, _ = agent.learn(env)
+            ep_return, ep_loss, _ = agent.learn(env)
             all_rewards.append(ep_return)
-            wandb.log({"episode_reward": ep_return, "loss": loss}, step=episode)
+            if ep_loss is not None:
+                all_loss.append(ep_loss)
+            wandb.log({
+                        "episode_reward": ep_return,
+                        "episode_loss": ep_loss if ep_loss is not None else 0.0,
+                    }, step=episode)
             
             if (episode + 1) % 100 == 0:
                 avg_reward = float(np.mean(all_rewards[-100:]))
+                avg_loss = np.mean([
+                    l.detach().cpu().item() if isinstance(l, torch.Tensor) else l
+                    for l in all_loss[-100:]
+                ])
+
                 print(f"[Episode {episode + 1}] AvgReward(Last100) = {avg_reward:.2f}")
-                wandb.log({"avg_reward_100": avg_reward}, step=episode)
+                wandb.log({
+                    "avg_reward_100": avg_reward,
+                    "avg_loss_100": avg_loss
+                    },  step=episode)
+
 
                 ckpt_dir = os.path.join("weights", task_name, "MC_REINFORCE")
                 os.makedirs(ckpt_dir, exist_ok=True)
                 ckpt_filename = (
                     f"ep{episode}"
+                    f"_na{num_of_action}"
                     f"_lr{learning_rate}"
                     f"_hd{hidden_dim}"
                     f"_dp{dropout}"
