@@ -381,3 +381,12 @@ class MC_REINFORCE(BaseAlgorithm):
             else:
                 display.display(plt.gcf())
     # ================================================================================== #
+    
+    def select_action(self, state):
+        with torch.no_grad():
+            state = self._unwrap_obs(state)
+            state = torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
+            probs = self.policy_net(state)
+            dist = torch.distributions.Categorical(probs)
+            action = dist.sample()
+        return action

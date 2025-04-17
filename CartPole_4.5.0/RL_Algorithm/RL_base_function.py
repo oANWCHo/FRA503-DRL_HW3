@@ -7,6 +7,7 @@ import json
 import torch
 import torch.nn as nn
 
+
 Transition = namedtuple('Transition',
                         ('state', 'action', 'next_state', 'reward'))
 
@@ -192,15 +193,32 @@ class BaseAlgorithm():
             
     def load_w(self, path, filename):
         """
-        Load weight parameters.
+        Load weight parameters from either .pt (PyTorch) or .npy (NumPy).
+        Automatically detects the file format based on the extension.
         """
-        # ========= put your code here ========= #
+        import os
+        import torch
+        import numpy as np
+
         full_path = os.path.join(path, filename)
-        if os.path.exists(full_path):
-            self.w = np.load(full_path)
-            print(f"Weights loaded from {full_path}.")
-        else:
+
+        if not os.path.exists(full_path):
             print(f"File {full_path} does not exist. Unable to load weights.")
-        # ====================================== #
+            return
 
+        ext = os.path.splitext(filename)[1]
+        device = getattr(self, "device", "cpu")
 
+        if ext == ".pt":
+            state_dict = torch.load(full_path, map_location=device)
+            net = getattr(self, "policy_net", None)
+            if net is not None:
+                net.load_state_dict(state_dict)
+                print(f"PyTorch model weights loaded from {full_path}.")
+            else:
+                print("Error: This agent does not have a 'policy_net' attribute.")
+        elif ext == ".npy":
+            self.w = np.load(full_path)
+            print(f"Numpy weights loaded from {full_path}.")
+        else:
+            print(f"Unsupported file format: {ext}")
