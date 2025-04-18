@@ -193,32 +193,37 @@ class BaseAlgorithm():
             
     def load_w(self, path, filename):
         """
-        Load weight parameters from either .pt (PyTorch) or .npy (NumPy).
-        Automatically detects the file format based on the extension.
+        Load weights for agents: support both .npy (Linear Q) and .pt (DQN, AC, etc.)
         """
         import os
-        import torch
         import numpy as np
+        import torch
 
         full_path = os.path.join(path, filename)
-
         if not os.path.exists(full_path):
-            print(f"File {full_path} does not exist. Unable to load weights.")
+            print(f"❌ File {full_path} does not exist.")
             return
 
-        ext = os.path.splitext(filename)[1]
-        device = getattr(self, "device", "cpu")
-
-        if ext == ".pt":
-            state_dict = torch.load(full_path, map_location=device)
-            net = getattr(self, "policy_net", None)
-            if net is not None:
-                net.load_state_dict(state_dict)
-                print(f"PyTorch model weights loaded from {full_path}.")
-            else:
-                print("Error: This agent does not have a 'policy_net' attribute.")
-        elif ext == ".npy":
+        if filename.endswith(".npy"):
             self.w = np.load(full_path)
-            print(f"Numpy weights loaded from {full_path}.")
+            print(f"[LinearQ] Weights loaded from {full_path}")
+
+        elif filename.endswith(".pt"):
+            state_dict = torch.load(full_path, map_location=self.device)
+
+            # Case: DQN or MC_REINFORCE (has policy_net)
+            if hasattr(self, "policy_net") and isinstance(state_dict, dict):
+                self.policy_net.load_state_dict(state_dict)
+                print(f"[DQN / MC_REINFORCE] policy_net loaded from {full_path}")
+
+            # Case: Actor-Critic (has actor and critic)
+            elif hasattr(self, "actor"):
+                self.actor.load_state_dict(state_dict)
+                print(f"[Actor-Critic] actor loaded from {full_path}")
+
+            else:
+                print("Error: Agent structure doesn't match expected keys.")
+
         else:
-            print(f"Unsupported file format: {ext}")
+            print("Unsupported file format. Only .npy and .pt are supported.")
+
