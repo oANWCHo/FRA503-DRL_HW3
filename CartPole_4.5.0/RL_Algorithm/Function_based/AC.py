@@ -318,32 +318,32 @@ class Actor_Critic(BaseAlgorithm):
 
         # ====================================== #
 
-    def calculate_loss(self, states, actions, rewards, next_states, dones):
-        """
-        Computes the loss for policy optimization.
+    # def calculate_loss(self, states, actions, rewards, next_states, dones):
+    #     """
+    #     Computes the loss for policy optimization.
 
-        Args:
-            - states (Tensor): The batch of current states.
-            - actions (Tensor): The batch of actions taken.
-            - rewards (Tensor): The batch of rewards received.
-            - next_states (Tensor): The batch of next states received.
-            - dones (Tensor): The batch of dones received.
+    #     Args:
+    #         - states (Tensor): The batch of current states.
+    #         - actions (Tensor): The batch of actions taken.
+    #         - rewards (Tensor): The batch of rewards received.
+    #         - next_states (Tensor): The batch of next states received.
+    #         - dones (Tensor): The batch of dones received.
 
-        Returns:
-            Tensor: Computed critic & actor loss.
-        """
-        # ========= put your code here ========= #
+    #     Returns:
+    #         Tensor: Computed critic & actor loss.
+    #     """
+    #     # ========= put your code here ========= #
         
-        # ----- Critic Update -----
-        with torch.no_grad():
-            next_actions = self.actor_target(next_states)
-            q_tgt = rewards + self.gamma * (1 - dones) * self.critic_target(next_states, next_actions)
+    #     # ----- Critic Update -----
+    #     with torch.no_grad():
+    #         next_actions = self.actor_target(next_states)
+    #         q_tgt = rewards + self.gamma * (1 - dones) * self.critic_target(next_states, next_actions)
 
-        q      = self.critic(states, actions)
-        critic = self.mse(q, q_tgt)
+    #     q      = self.critic(states, actions)
+    #     critic = self.mse(q, q_tgt)
 
-        actor  = -self.critic(states, self.actor(states)).mean()
-        return critic.item(), actor.item()
+    #     actor  = -self.critic(states, self.actor(states)).mean()
+    #     return critic.item(), actor.item()
         # ====================================== #
 
     def update_policy(self):
@@ -363,13 +363,13 @@ class Actor_Critic(BaseAlgorithm):
         rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-7)
 
         # ---------- Critic update ------------------------------------------
-        with torch.no_grad():
-            next_actions = self.actor_target(next_states)
+        with torch.no_grad(): 
+            next_actions = self.actor_target(next_states)         # → μ'(s')
             q_target = rewards + self.gamma * (1 - dones) * \
-                    self.critic_target(next_states, next_actions)
+                    self.critic_target(next_states, next_actions)  # → r + γ Q'(s', μ'(s'))
 
-        q     = self.critic(states, actions)
-        critic_loss = self.mse(q, q_target)
+        q     = self.critic(states, actions)   # → Q(s, a)
+        critic_loss = self.mse(q, q_target)  # → MSE loss = L_critic
 
         self.critic_opt.zero_grad()
         critic_loss.backward()
@@ -377,7 +377,7 @@ class Actor_Critic(BaseAlgorithm):
         self.critic_opt.step()
 
         # ---------- Actor update  (re‑compute with fresh critic) ------------
-        actor_loss = -self.critic(states, self.actor(states)).mean()
+        actor_loss = -self.critic(states, self.actor(states)).mean()   # → -Q(s, μ(s))
 
         self.actor_opt.zero_grad()
         actor_loss.backward()
@@ -385,15 +385,11 @@ class Actor_Critic(BaseAlgorithm):
         self.actor_opt.step()
 
         # ---------- Soft update of targets ---------------------------------
-        with torch.no_grad():
-            for t, s in zip(self.actor_target.parameters(), self.actor.parameters()):
-                t.data.mul_(1 - self.tau).add_(self.tau * s.data)
-            for t, s in zip(self.critic_target.parameters(), self.critic.parameters()):
-                t.data.mul_(1 - self.tau).add_(self.tau * s.data)
+        self.update_target_networks(self.tau)
 
         return actor_loss.item(),critic_loss.item()
         # ====================================== #
-
+       
 
     def update_target_networks(self, tau=None):
         """
@@ -406,35 +402,102 @@ class Actor_Critic(BaseAlgorithm):
         if tau is None:
             tau = self.tau
 
-        # Update actor target
-        for target_param, param in zip(self.actor_target.parameters(), self.actor.parameters()):
-            target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
-
-        # Update critic target
-        for target_param, param in zip(self.critic_target.parameters(), self.critic.parameters()):
-            target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
+        with torch.no_grad():
+            for t, s in zip(self.actor_target.parameters(), self.actor.parameters()): #target and main
+                t.data.mul_(1 - self.tau).add_(self.tau * s.data)
+            for t, s in zip(self.critic_target.parameters(), self.critic.parameters()):
+                t.data.mul_(1 - self.tau).add_(self.tau * s.data)
         # ====================================== #
 
-    def learn(self, env, max_steps, num_agents, noise_scale=0.1, noise_decay=0.99):
+    # def learn(self, env, max_steps, num_agents, noise_scale=0.1, noise_decay=0.99):
+    #     """
+    #     Train the agent on a single step.
+
+    #     Args:
+    #         env: The environment in which the agent interacts.
+    #         max_steps (int): Maximum number of steps per episode.
+    #         num_agents (int): Number of agents in the environment.
+    #         noise_scale (float, optional): Initial exploration noise level. Defaults to 0.1.
+    #         noise_decay (float, optional): Factor by which noise decreases per step. Defaults to 0.99.
+    #     """
+
+    #     # ===== Initialize trajectory collection variables ===== #
+    #     # Reset environment to get initial state (tensor)
+    #     # Track total episode return (float)
+    #     # Flag to indicate episode termination (boolean)
+    #     # Step counter (int)
+    #     # ========= put your code here ========= #
+    #     state, _ = env.reset()
+
+    #     if isinstance(state, dict) and 'policy' in state:
+    #         state = state['policy']
+
+    #     ep_ret = 0.0
+    #     noise = noise_scale
+    #     last_a_loss = None
+    #     last_c_loss = None
+
+    #     for _ in range(max_steps):
+    #         act_scaled_list, act_raw_list = [], []
+
+    #         for i in range(num_agents):
+    #             a_s, a_r = self.select_action(state[i], noise)
+    #             act_scaled_list.append(a_s)
+    #             act_raw_list.append(a_r)
+
+    #         act_scaled = torch.cat(act_scaled_list, dim=0)  # shape [num_agents, action_dim]
+    #         step_out = env.step(act_scaled)
+
+    #         if len(step_out) == 5:
+    #             next_state, reward, terminated, truncated, _ = step_out
+    #             if isinstance(next_state, dict) and 'policy' in next_state:
+    #                 next_state = next_state['policy']
+    #             done_flag = [t or tr for t, tr in zip(terminated, truncated)]
+    #         else:
+    #             next_state, reward, done_flag, _ = step_out
+
+    #         for i in range(num_agents):
+    #             r = reward[i]
+    #             d = done_flag[i]
+    #             r = r.item() if torch.is_tensor(r) and r.numel() == 1 else float(r[0]) if torch.is_tensor(r) else float(r)
+    #             d = d.item() if torch.is_tensor(d) and d.numel() == 1 else bool(d[0]) if torch.is_tensor(d) else bool(d)
+
+    #             self.memory.add(
+    #                 self._unwrap_obs(state[i]),
+    #                 torch.as_tensor(act_raw_list[i], dtype=torch.float32),
+    #                 r,
+    #                 self._unwrap_obs(next_state[i]),
+    #                 d,
+    #             )
+    #             ep_ret += r
+
+    #         a_loss, c_loss = self.update_policy()
+    #         if a_loss is not None and c_loss is not None:
+    #             last_a_loss = a_loss
+    #             last_c_loss = c_loss
+    #         state = next_state
+    #         noise *= noise_decay
+
+    #         if all(bool(d) for d in done_flag):
+    #             break
+
+
+    #     return float(ep_ret), last_a_loss, last_c_loss
+
+    def learn(self, env, max_steps, num_agents=1, noise_scale=0.1, noise_decay=0.99):
         """
-        Train the agent on a single step.
+        Train the agent for one episode (single-agent only).
 
         Args:
             env: The environment in which the agent interacts.
             max_steps (int): Maximum number of steps per episode.
-            num_agents (int): Number of agents in the environment.
-            noise_scale (float, optional): Initial exploration noise level. Defaults to 0.1.
-            noise_decay (float, optional): Factor by which noise decreases per step. Defaults to 0.99.
+            num_agents (int): Expected to be 1 for single-agent.
+            noise_scale (float, optional): Initial exploration noise level.
+            noise_decay (float, optional): Noise decay factor.
         """
 
-        # ===== Initialize trajectory collection variables ===== #
-        # Reset environment to get initial state (tensor)
-        # Track total episode return (float)
-        # Flag to indicate episode termination (boolean)
-        # Step counter (int)
-        # ========= put your code here ========= #
+        # Reset environment
         state, _ = env.reset()
-
         if isinstance(state, dict) and 'policy' in state:
             state = state['policy']
 
@@ -444,48 +507,43 @@ class Actor_Critic(BaseAlgorithm):
         last_c_loss = None
 
         for _ in range(max_steps):
-            act_scaled_list, act_raw_list = [], []
+            # Select action
+            act_scaled, act_raw = self.select_action(state, noise)
 
-            for i in range(num_agents):
-                a_s, a_r = self.select_action(state[i], noise)
-                act_scaled_list.append(a_s)
-                act_raw_list.append(a_r)
-
-            act_scaled = torch.cat(act_scaled_list, dim=0)  # shape [num_agents, action_dim]
+            # Step in environment
             step_out = env.step(act_scaled)
-
             if len(step_out) == 5:
                 next_state, reward, terminated, truncated, _ = step_out
                 if isinstance(next_state, dict) and 'policy' in next_state:
                     next_state = next_state['policy']
-                done_flag = [t or tr for t, tr in zip(terminated, truncated)]
+                done_flag = terminated or truncated
             else:
                 next_state, reward, done_flag, _ = step_out
 
-            for i in range(num_agents):
-                r = reward[i]
-                d = done_flag[i]
-                r = r.item() if torch.is_tensor(r) and r.numel() == 1 else float(r[0]) if torch.is_tensor(r) else float(r)
-                d = d.item() if torch.is_tensor(d) and d.numel() == 1 else bool(d[0]) if torch.is_tensor(d) else bool(d)
+            # Convert reward and done
+            r = reward.item() if torch.is_tensor(reward) else float(reward)
+            d = bool(done_flag.item()) if torch.is_tensor(done_flag) else bool(done_flag)
 
-                self.memory.add(
-                    self._unwrap_obs(state[i]),
-                    torch.as_tensor(act_raw_list[i], dtype=torch.float32),
-                    r,
-                    self._unwrap_obs(next_state[i]),
-                    d,
-                )
-                ep_ret += r
+            # Store transition
+            self.memory.add(
+                self._unwrap_obs(state),
+                torch.as_tensor(act_raw, dtype=torch.float32),
+                r,
+                self._unwrap_obs(next_state),
+                d,
+            )
+            ep_ret += r
 
+            # Update policy
             a_loss, c_loss = self.update_policy()
             if a_loss is not None and c_loss is not None:
                 last_a_loss = a_loss
                 last_c_loss = c_loss
+
             state = next_state
             noise *= noise_decay
 
-            if all(bool(d) for d in done_flag):
+            if d:
                 break
-
 
         return float(ep_ret), last_a_loss, last_c_loss
