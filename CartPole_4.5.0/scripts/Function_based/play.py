@@ -105,15 +105,15 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # ========================= Can be modified ========================== #
 
     # hyperparameters lq
-    # num_of_action = 5
-    # action_range = [-15.0, 15.0]
-    # learning_rate = 0.005
-    # initial_epsilon = 0
-    # epsilon_decay = 0
-    # final_epsilon = 0
-    # discount = 0.99
-    # n_episodes = 10000
-    # max_steps = 2000
+    num_of_action = 5
+    action_range = [-15.0, 15.0]
+    learning_rate = 0.005
+    initial_epsilon = 0
+    epsilon_decay = 0
+    final_epsilon = 0
+    discount = 0.99
+    n_episodes = 10000
+    max_steps = 2000
 
     # hyperparameter dqn
     # num_of_action = 5
@@ -132,27 +132,27 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # n_episodes = 10000
 
     # hyperparameter MC
-    # num_of_action = 5 
-    # action_range = [-7, 7] 
+    # num_of_action = 21
+    # action_range = [-20, 20] 
     # n_observations = 4 
-    # hidden_dim = 128 
-    # learning_rate = 0.005  
-    # dropout = 0.0
+    # hidden_dim = 64
+    # learning_rate = 0.001
+    # dropout = 0.3
     # discount_factor = 0.99
     # n_episodes = 10000
 
     # hyperparameters AC
-    num_of_action = 1
-    action_range = [-16.0, 16.0]  # [min, max]
-    n_observations = 4
-    learning_rate = 0.001 #0.0005
-    hidden_dim = 256 #64 128
-    tau = 0.005 #0.001 0.01
-    buffer_size = 5000 #5000 7000 3000 
-    batch_size = 64 #64 128 256
-    discount_factor = 0.99 #0.1
-    n_episodes = 10000
-    num_agents = 1
+    # num_of_action = 1
+    # action_range = [-16.0, 16.0]  # [min, max]
+    # n_observations = 4
+    # learning_rate = 0.001 #0.0005
+    # hidden_dim = 128 #64 128
+    # tau = 0.005 #0.001 0.01
+    # buffer_size = 5000 #5000 7000 3000 
+    # batch_size = 64 #64 128 256
+    # discount_factor = 0.99 #0.1
+    # n_episodes = 10000
+    # num_agents = 1
 
 
     # set up matplotlib
@@ -168,18 +168,17 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         "mps" if torch.backends.mps.is_available() else
         "cpu"
     )
-
     print("device: ", device)
 
-    # agent = Linear_QN(
-    #     num_of_action=num_of_action,
-    #     action_range=action_range,
-    #     learning_rate=learning_rate,
-    #     initial_epsilon=initial_epsilon,
-    #     epsilon_decay=epsilon_decay,
-    #     final_epsilon=final_epsilon,
-    #     discount_factor=discount,
-    # )
+    agent = Linear_QN(
+        num_of_action=num_of_action,
+        action_range=action_range,
+        learning_rate=learning_rate,
+        initial_epsilon=initial_epsilon,
+        epsilon_decay=epsilon_decay,
+        final_epsilon=final_epsilon,
+        discount_factor=discount,
+    )
 
     # agent = DQN(
     #     device=device,
@@ -209,29 +208,30 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     #     discount_factor=discount_factor
     # )
 
-    agent = Actor_Critic(
-        device = device, 
-        num_of_action  = num_of_action,
-        action_range = action_range,
-        n_observations = n_observations,
-        hidden_dim = hidden_dim,
-        learning_rate = learning_rate,
-        tau = tau,
-        discount_factor = discount_factor,
-        buffer_size = buffer_size,
-        batch_size = batch_size,
-    )
+    # agent = Actor_Critic(
+    #     device = device, 
+    #     num_of_action  = num_of_action,
+    #     action_range = action_range,
+    #     n_observations = n_observations,
+    #     hidden_dim = hidden_dim,
+    #     learning_rate = learning_rate,
+    #     tau = tau,
+    #     discount_factor = discount_factor,
+    #     buffer_size = buffer_size,
+    #     batch_size = batch_size,
+    # )
 
     task_name = str(args_cli.task).split('-')[0]  # Stabilize, SwingUp
-    # Algorithm_name = "LinearQ"
+    Algorithm_name = "LinearQ"
     # Algorithm_name = "DQN"  
     # Algorithm_name = "MC_REINFORCE"  
-    Algorithm_name = "AC" 
-    episode = 299
-    # q_value_file = f"ep{episode}_lr{learning_rate}_na{num_of_action}_acr{action_range[1]}_ms{max_steps}_dis{discount}.npy" #LQ
+    # Algorithm_name = "AC" 
+    episode = 5500-1
+    q_value_file = f"ep{episode}_lr{learning_rate}_na{num_of_action}_acr{action_range[1]}_ms{max_steps}_dis{discount}.npy" #LQ
     # q_value_file = f"dqn_na{num_of_action}_ep{episode}_lr{learning_rate}_bs{batch_size}_dis{discount_factor}_τ{tau}_hd{hidden_dim}.pt" #DQN
     # q_value_file   =  f"ep{episode}_na{num_of_action}_lr{learning_rate}_hd{hidden_dim}_dp{dropout}_dis{discount_factor}.pt" #MC
-    q_value_file = f"ac_agents{num_agents}_ep{episode}_lr{learning_rate}_bs{batch_size}_dis{discount_factor}_τ{tau}_hd{hidden_dim}.pt" #AC
+    # q_value_file = f"ep1699_na21_lr0.001_hd64_dp0.3_dis0.99.pt"
+    # q_value_file = f"ac_agents{num_agents}_ep{episode}_lr{learning_rate}_bs{batch_size}_dis{discount_factor}_τ{tau}_hd{hidden_dim}.pt" #AC
 
     full_path = os.path.join(f"weights/{task_name}", Algorithm_name)
     agent.load_w(full_path, q_value_file)
@@ -249,11 +249,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 done = False
 
                 while not done:
-                    # agent stepping
-                    
-                    # action = agent.select_action(obs)#LQ DQN MC
-                    # action_tensor = torch.tensor([[action]], dtype=torch.int64)
-                    action_tensor,_ = agent.select_action(obs)
+                    action = agent.select_action(obs)#LQ DQN MC
+                    action_tensor = torch.tensor([[action]], dtype=torch.int64)
+                    # action_tensor,_ = agent.select_action(obs)
                     
 
                     # env stepping

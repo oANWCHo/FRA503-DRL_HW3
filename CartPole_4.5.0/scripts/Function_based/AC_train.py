@@ -110,17 +110,17 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     num_of_action = 1
     action_range = [-16.0, 16.0]  # [min, max]
     n_observations = 4
-    learning_rate = 0.001 #0.0005
-    hidden_dim = 64 #64 128
-    tau = 0.005 #0.001 0.01
-    buffer_size = 5000 #5000 7000 3000 
+    learning_rate = 0.001
+    hidden_dim = 256
+    tau = 0.005 
+    buffer_size = 5000 
 
 
-    batch_size = 64 #64 128 256
-    discount_factor = 0.99 #0.1
+    batch_size = 64
+    discount_factor = 0.99 
 
-    noise_scale_init     = 0.2
-    noise_decay          = 0.995
+    noise_scale_init     = 0.2 
+    noise_decay          = 0.5 #0.99 0.5
 
     n_episodes = 10000
     max_steps_per_episode = 1000

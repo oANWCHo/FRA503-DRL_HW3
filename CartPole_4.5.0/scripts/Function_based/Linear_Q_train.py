@@ -109,9 +109,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     initial_epsilon = 1.0
     epsilon_decay = 0.9997
     final_epsilon = 0.01
-    discount = 0.99
+    discount = 0.01
     n_episodes = 10000
-    max_steps = 2000
+    max_steps = 000
 
 
     # set up matplotlib

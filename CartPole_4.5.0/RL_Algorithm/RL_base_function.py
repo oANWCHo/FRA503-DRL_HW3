@@ -167,7 +167,7 @@ class BaseAlgorithm():
         fraction = action / (self.num_of_action - 1) if self.num_of_action > 1 else 0.0
         scaled = action_min + fraction * (action_max - action_min)
 
-        # ✅ Return shape [1, 1] → [num_envs, action_dim]
+        
         return torch.tensor([[scaled]], dtype=torch.float32).to("cuda")  # หรือ .to(self.device)
 
 
@@ -209,7 +209,7 @@ class BaseAlgorithm():
             print(f"[LinearQ] Weights loaded from {full_path}")
 
         elif filename.endswith(".pt"):
-            state_dict = torch.load(full_path, map_location=self.device)
+            state_dict = torch.load(full_path, map_location=self.device, weights_only=True)
 
             # Case: DQN or MC_REINFORCE (has policy_net)
             if hasattr(self, "policy_net") and isinstance(state_dict, dict):

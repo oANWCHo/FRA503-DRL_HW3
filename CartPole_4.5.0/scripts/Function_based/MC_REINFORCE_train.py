@@ -104,16 +104,16 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
 
     # Hyperparameters
-    num_of_action = 5 #  if num_of_ac end please run [-2.5,2.5] num_ac 2
-    action_range = [-7, 7] 
+    num_of_action = 21 #  if num_of_ac end please run [-2.5,2.5] num_ac 2
+    action_range = [-20, 20] 
     n_observations = 4 # Fix
 
-    hidden_dim = 128 #64 256 
-    learning_rate = 0.005  
-    dropout = 0.0
+    hidden_dim = 64 # 32 64(base) 256 
+    learning_rate = 0.001 #0.001(base)  0.01  
+    dropout = 0.5 #0.5 0.3 0.7
     discount_factor = 0.99
 
-    n_episodes = 10000
+    n_episodes = 2000
 
     task_name = str(args_cli.task).split('-')[0]  # เช่น Stabilize
 
